@@ -1,1414 +1,2198 @@
+/**
+ * File: regional-beer-awards/regional-beer-awards.php
+ * Description: Main plugin file with plugin header
+ */
 <?php
 /**
- * Plugin Name: Regional Beer Awards Display Multi-Contest
+ * Plugin Name: Regional Beer Awards Display
+ * Plugin URI: https://rihobeer.com/plugins/regional-beer-awards/
  * Description: 複数のビールコンテストの受賞データを地域別に表示するためのプラグイン
- * Version: 2.0
+ * Version: 2.0.0
  * Author: Your Name
+ * Author URI: https://rihobeer.com/
+ * Text Domain: regional-beer-awards
+ * Domain Path: /languages
+ * License: GPL v2 or later
  */
 
-// カスタム投稿タイプ「award_beer」の作成
-function create_award_beer_post_type() {
-    register_post_type('award_beer',
-        array(
+// 直接アクセス禁止
+if (!defined('ABSPATH')) {
+    exit;
+}
+
+// 定数定義
+define('RBA_VERSION', '2.0.0');
+define('RBA_PLUGIN_DIR', plugin_dir_path(__FILE__));
+define('RBA_PLUGIN_URL', plugin_dir_url(__FILE__));
+define('RBA_PLUGIN_BASENAME', plugin_basename(__FILE__));
+
+// 必要なファイルを読み込み
+require_once RBA_PLUGIN_DIR . 'includes/class-beer-awards-post-type.php';
+require_once RBA_PLUGIN_DIR . 'includes/class-beer-awards-admin.php';
+require_once RBA_PLUGIN_DIR . 'includes/class-beer-awards-shortcode.php';
+require_once RBA_PLUGIN_DIR . 'includes/class-beer-awards-widget.php';
+require_once RBA_PLUGIN_DIR . 'includes/class-beer-awards-rest-api.php';
+
+// メインプラグインクラス
+class Regional_Beer_Awards {
+    // シングルトンパターン
+    private static $instance = null;
+    
+    // インスタンスの取得
+    public static function get_instance() {
+        if (null === self::$instance) {
+            self::$instance = new self();
+        }
+        return self::$instance;
+    }
+    
+    // コンストラクタ
+    private function __construct() {
+        // 初期化
+        add_action('plugins_loaded', array($this, 'load_textdomain'));
+        
+        // 各機能クラスのインスタンス化
+        $this->post_type = new Beer_Awards_Post_Type();
+        $this->admin = new Beer_Awards_Admin();
+        $this->shortcode = new Beer_Awards_Shortcode();
+        $this->widget = new Beer_Awards_Widget();
+        $this->rest_api = new Beer_Awards_REST_API();
+        
+        // アセット読み込み
+        add_action('wp_enqueue_scripts', array($this, 'enqueue_front_assets'));
+        add_action('admin_enqueue_scripts', array($this, 'enqueue_admin_assets'));
+    }
+    
+    // テキストドメイン読み込み（多言語対応）
+    public function load_textdomain() {
+        load_plugin_textdomain('regional-beer-awards', false, dirname(RBA_PLUGIN_BASENAME) . '/languages');
+    }
+    
+    // フロントエンド用アセット読み込み
+    public function enqueue_front_assets() {
+        wp_enqueue_style('beer-awards-style', RBA_PLUGIN_URL . 'assets/css/beer-awards.css', array(), RBA_VERSION);
+        wp_enqueue_script('beer-awards-script', RBA_PLUGIN_URL . 'assets/js/beer-awards.js', array('jquery'), RBA_VERSION, true);
+        
+        wp_localize_script('beer-awards-script', 'beer_awards_ajax', array(
+            'ajax_url' => admin_url('admin-ajax.php'),
+            'nonce' => wp_create_nonce('beer_filter_nonce')
+        ));
+    }
+    
+    // 管理画面用アセット読み込み
+    public function enqueue_admin_assets($hook) {
+        // 管理画面の特定ページのみでアセットを読み込み
+        if (strpos($hook, 'beer-data-import') !== false) {
+            wp_enqueue_style('beer-awards-admin-style', RBA_PLUGIN_URL . 'assets/css/beer-awards-admin.css', array(), RBA_VERSION);
+            wp_enqueue_script('beer-awards-admin-script', RBA_PLUGIN_URL . 'assets/js/beer-awards-admin.js', array('jquery'), RBA_VERSION, true);
+        }
+    }
+    
+    // アクティベーション時の処理
+    public static function activate() {
+        // カスタム投稿タイプと分類の登録
+        require_once RBA_PLUGIN_DIR . 'includes/class-beer-awards-post-type.php';
+        $post_type = new Beer_Awards_Post_Type();
+        $post_type->register_post_types();
+        $post_type->register_taxonomies();
+        
+        // パーマリンク構造のフラッシュ
+        flush_rewrite_rules();
+    }
+    
+    // 非アクティベーション時の処理
+    public static function deactivate() {
+        // 必要な処理を記述
+        flush_rewrite_rules();
+    }
+}
+
+// インスタンス化
+function regional_beer_awards() {
+    return Regional_Beer_Awards::get_instance();
+}
+regional_beer_awards();
+
+// アクティベーション・非アクティベーションフック
+register_activation_hook(__FILE__, array('Regional_Beer_Awards', 'activate'));
+register_deactivation_hook(__FILE__, array('Regional_Beer_Awards', 'deactivate'));
+
+/**
+ * File: regional-beer-awards/readme.txt
+ * Description: Plugin description file for WordPress.org
+ */
+=== Regional Beer Awards Display ===
+Contributors: yourname
+Tags: beer, awards, competition, craft beer
+Requires at least: 5.0
+Tested up to: 6.3
+Stable tag: 2.0.0
+License: GPLv2 or later
+License URI: http://www.gnu.org/licenses/gpl-2.0.html
+
+複数のビールコンテストの受賞データを地域別に表示するためのプラグイン
+
+== Description ==
+Regional Beer Awards Displayは、World Beer Cup、GABFなど様々なビールコンテストの受賞データを管理し、地域別に表示するためのプラグインです。
+
+主な機能:
+* 複数のコンテストに対応
+* 地域ごとのフィルタリング
+* CSV/JSONのインポート/エクスポート
+* マークダウンテーブルからJSONへの変換
+* レスポンシブデザイン対応
+
+== Installation ==
+1. プラグインをアップロードし、有効化する
+2. データをインポートする（CSVまたはJSON形式）
+3. ショートコードを使って表示する: [beer_search]
+
+== Frequently Asked Questions ==
+= コンテスト別に表示するには？ =
+`[beer_search contest="World Beer Cup" year="2025"]`のようにショートコードのパラメータで指定できます。
+
+== Changelog ==
+= 2.0.0 =
+* 複数コンテスト対応機能を追加
+* JSONインポート/エクスポート機能を追加
+* マークダウン変換ツールを追加
+
+== Upgrade Notice ==
+= 2.0.0 =
+複数のビールコンテストに対応するようになりました。
+
+/**
+ * File: regional-beer-awards/uninstall.php
+ * Description: Handles plugin uninstallation
+ */
+<?php
+// If uninstall not called from WordPress, exit
+if (!defined('WP_UNINSTALL_PLUGIN')) {
+    exit;
+}
+
+// 設定の削除
+delete_option('rba_settings');
+
+// カスタム投稿タイプのデータ削除（オプション）
+// 注意: これはすべての投稿を削除します。必要に応じてコメントアウト
+$args = array(
+    'post_type' => 'award_beer',
+    'posts_per_page' => -1,
+);
+$query = new WP_Query($args);
+
+if ($query->have_posts()) {
+    while ($query->have_posts()) {
+        $query->the_post();
+        wp_delete_post(get_the_ID(), true); // 第2引数trueで完全削除
+    }
+}
+wp_reset_postdata();
+
+// カスタムタクソノミーの削除
+$taxonomies = array('beer_contest', 'beer_year', 'beer_category', 'beer_country', 'beer_state', 'beer_city', 'beer_medal');
+foreach ($taxonomies as $taxonomy) {
+    $terms = get_terms(array(
+        'taxonomy' => $taxonomy,
+        'hide_empty' => false,
+    ));
+    
+    foreach ($terms as $term) {
+        wp_delete_term($term->term_id, $taxonomy);
+    }
+}
+
+/**
+ * File: regional-beer-awards/includes/class-beer-awards-post-type.php
+ * Description: Registers custom post types and taxonomies
+ */
+<?php
+/**
+ * カスタム投稿タイプと分類を管理するクラス
+ */
+class Beer_Awards_Post_Type {
+    public function __construct() {
+        // カスタム投稿タイプと分類の登録
+        add_action('init', array($this, 'register_post_types'));
+        add_action('init', array($this, 'register_taxonomies'));
+        
+        // カスタムメタボックスの追加
+        add_action('add_meta_boxes', array($this, 'add_meta_boxes'));
+        add_action('save_post', array($this, 'save_meta_box_data'));
+        
+        // カスタム投稿タイプのカラム管理
+        add_filter('manage_award_beer_posts_columns', array($this, 'set_custom_columns'));
+        add_action('manage_award_beer_posts_custom_column', array($this, 'custom_column_content'), 10, 2);
+        add_filter('manage_edit-award_beer_sortable_columns', array($this, 'sortable_columns'));
+    }
+    
+    // カスタム投稿タイプの登録
+    public function register_post_types() {
+        register_post_type('award_beer', array(
             'labels' => array(
-                'name' => __('受賞ビール'),
-                'singular_name' => __('受賞ビール')
+                'name' => __('受賞ビール', 'regional-beer-awards'),
+                'singular_name' => __('受賞ビール', 'regional-beer-awards'),
+                'add_new' => __('新規追加', 'regional-beer-awards'),
+                'add_new_item' => __('新規受賞ビールを追加', 'regional-beer-awards'),
+                'edit_item' => __('受賞ビールを編集', 'regional-beer-awards'),
+                'view_item' => __('受賞ビールを表示', 'regional-beer-awards'),
+                'search_items' => __('受賞ビールを検索', 'regional-beer-awards'),
+                'not_found' => __('受賞ビールが見つかりません', 'regional-beer-awards'),
+                'not_found_in_trash' => __('ゴミ箱に受賞ビールはありません', 'regional-beer-awards'),
             ),
             'public' => true,
             'has_archive' => true,
             'supports' => array('title', 'editor', 'thumbnail'),
             'menu_icon' => 'dashicons-awards',
-        )
-    );
-}
-add_action('init', 'create_award_beer_post_type');
-
-// カスタムタクソノミーの作成
-function create_award_beer_taxonomies() {
-    // コンテスト（大会）タクソノミー - 新規追加
-    register_taxonomy(
-        'beer_contest',
-        'award_beer',
-        array(
-            'label' => __('コンテスト'),
-            'hierarchical' => true,
-            'show_admin_column' => true,
-        )
-    );
-    
-    // 開催年タクソノミー - 新規追加
-    register_taxonomy(
-        'beer_year',
-        'award_beer',
-        array(
-            'label' => __('開催年'),
-            'hierarchical' => true,
-            'show_admin_column' => true,
-        )
-    );
-    
-    // カテゴリータクソノミー
-    register_taxonomy(
-        'beer_category',
-        'award_beer',
-        array(
-            'label' => __('ビールカテゴリー'),
-            'hierarchical' => true,
-            'show_admin_column' => true,
-        )
-    );
-    
-    // 国タクソノミー
-    register_taxonomy(
-        'beer_country',
-        'award_beer',
-        array(
-            'label' => __('国'),
-            'hierarchical' => true,
-            'show_admin_column' => true,
-        )
-    );
-    
-    // 都道府県タクソノミー
-    register_taxonomy(
-        'beer_state',
-        'award_beer',
-        array(
-            'label' => __('都道府県/州'),
-            'hierarchical' => true,
-        )
-    );
-    
-    // 都市タクソノミー
-    register_taxonomy(
-        'beer_city',
-        'award_beer',
-        array(
-            'label' => __('都市'),
-            'hierarchical' => true,
-        )
-    );
-    
-    // 受賞メダルタクソノミー
-    register_taxonomy(
-        'beer_medal',
-        'award_beer',
-        array(
-            'label' => __('メダル'),
-            'hierarchical' => true,
-            'show_admin_column' => true,
-        )
-    );
-}
-add_action('init', 'create_award_beer_taxonomies');
-
-// カスタムフィールドのセットアップ
-function add_beer_meta_boxes() {
-    add_meta_box(
-        'beer_details',
-        'ビール詳細情報',
-        'beer_details_callback',
-        'award_beer',
-        'normal',
-        'high'
-    );
-}
-add_action('add_meta_boxes', 'add_beer_meta_boxes');
-
-// メタボックスの内容を表示
-function beer_details_callback($post) {
-    wp_nonce_field(basename(__FILE__), 'beer_details_nonce');
-    
-    // カスタムフィールドから値を取得
-    $brewery = get_post_meta($post->ID, '_brewery', true);
-    $place = get_post_meta($post->ID, '_place', true);
-    
-    ?>
-    <div class="beer-meta-fields">
-        <p>
-            <label for="brewery">醸造所:</label>
-            <input type="text" id="brewery" name="brewery" value="<?php echo esc_attr($brewery); ?>" class="widefat">
-        </p>
-        <p>
-            <label for="place">順位:</label>
-            <input type="number" id="place" name="place" value="<?php echo esc_attr($place); ?>" min="1" max="3">
-        </p>
-    </div>
-    <?php
-}
-
-// メタボックスのデータを保存
-function save_beer_details($post_id) {
-    // チェックボックスの確認
-    if (!isset($_POST['beer_details_nonce']) || !wp_verify_nonce($_POST['beer_details_nonce'], basename(__FILE__))) {
-        return $post_id;
-    }
-    
-    // 自動保存チェック
-    if (defined('DOING_AUTOSAVE') && DOING_AUTOSAVE) {
-        return $post_id;
-    }
-    
-    // 権限の確認
-    if ('award_beer' == $_POST['post_type'] && !current_user_can('edit_post', $post_id)) {
-        return $post_id;
-    }
-    
-    // フィールドの更新
-    if (isset($_POST['brewery'])) {
-        update_post_meta($post_id, '_brewery', sanitize_text_field($_POST['brewery']));
-    }
-    
-    if (isset($_POST['place'])) {
-        update_post_meta($post_id, '_place', intval($_POST['place']));
-    }
-}
-add_action('save_post', 'save_beer_details');
-
-// フロントエンドでビール検索フォームを表示するショートコード
-function beer_search_form_shortcode($atts) {
-    // ショートコード属性の取得
-    $attributes = shortcode_atts(
-        array(
-            'contest' => '',  // デフォルトのコンテストを指定可能
-            'year' => '',     // デフォルトの年を指定可能
-        ), 
-        $atts
-    );
-    
-    ob_start();
-    
-    // コンテストの一覧を取得
-    $contests = get_terms(array(
-        'taxonomy' => 'beer_contest',
-        'hide_empty' => true,
-    ));
-    
-    // 年の一覧を取得
-    $years = get_terms(array(
-        'taxonomy' => 'beer_year',
-        'hide_empty' => true,
-        'order' => 'DESC',  // 新しい年順に表示
-    ));
-    
-    // 国の一覧を取得
-    $countries = get_terms(array(
-        'taxonomy' => 'beer_country',
-        'hide_empty' => true,
-    ));
-    
-    // カテゴリーの一覧を取得
-    $categories = get_terms(array(
-        'taxonomy' => 'beer_category',
-        'hide_empty' => true,
-    ));
-    
-    // メダルの一覧を取得
-    $medals = get_terms(array(
-        'taxonomy' => 'beer_medal',
-        'hide_empty' => true,
-    ));
-    ?>
-    
-    <div class="beer-search-form">
-        <h3>受賞ビール検索</h3>
-        <form id="beer-filter-form" method="GET">
-            <div class="form-row">
-                <div class="form-group">
-                    <label for="beer-contest">コンテスト:</label>
-                    <select id="beer-contest" name="beer_contest" class="form-control">
-                        <option value="">すべてのコンテスト</option>
-                        <?php foreach ($contests as $contest): ?>
-                            <option value="<?php echo $contest->slug; ?>" <?php selected($attributes['contest'], $contest->slug); ?>><?php echo $contest->name; ?></option>
-                        <?php endforeach; ?>
-                    </select>
-                </div>
-                
-                <div class="form-group">
-                    <label for="beer-year">開催年:</label>
-                    <select id="beer-year" name="beer_year" class="form-control">
-                        <option value="">すべての年</option>
-                        <?php foreach ($years as $year): ?>
-                            <option value="<?php echo $year->slug; ?>" <?php selected($attributes['year'], $year->slug); ?>><?php echo $year->name; ?></option>
-                        <?php endforeach; ?>
-                    </select>
-                </div>
-                
-                <div class="form-group">
-                    <label for="beer-medal">メダル:</label>
-                    <select id="beer-medal" name="beer_medal" class="form-control">
-                        <option value="">すべてのメダル</option>
-                        <?php foreach ($medals as $medal): ?>
-                            <option value="<?php echo $medal->slug; ?>"><?php echo $medal->name; ?></option>
-                        <?php endforeach; ?>
-                    </select>
-                </div>
-            </div>
-            
-            <div class="form-row">
-                <div class="form-group">
-                    <label for="beer-country">国:</label>
-                    <select id="beer-country" name="beer_country" class="form-control">
-                        <option value="">すべての国</option>
-                        <?php foreach ($countries as $country): ?>
-                            <option value="<?php echo $country->slug; ?>"><?php echo $country->name; ?></option>
-                        <?php endforeach; ?>
-                    </select>
-                </div>
-                
-                <div class="form-group">
-                    <label for="beer-state">都道府県/州:</label>
-                    <select id="beer-state" name="beer_state" class="form-control">
-                        <option value="">すべての都道府県/州</option>
-                    </select>
-                </div>
-                
-                <div class="form-group">
-                    <label for="beer-city">都市:</label>
-                    <select id="beer-city" name="beer_city" class="form-control">
-                        <option value="">すべての都市</option>
-                    </select>
-                </div>
-            </div>
-            
-            <div class="form-row">
-                <div class="form-group">
-                    <label for="beer-category">カテゴリー:</label>
-                    <select id="beer-category" name="beer_category" class="form-control">
-                        <option value="">すべてのカテゴリー</option>
-                        <?php foreach ($categories as $category): ?>
-                            <option value="<?php echo $category->slug; ?>"><?php echo $category->name; ?></option>
-                        <?php endforeach; ?>
-                    </select>
-                </div>
-                
-                <div class="form-group">
-                    <label for="beer-search">検索:</label>
-                    <input type="text" id="beer-search" name="beer_search" class="form-control" placeholder="ビール名や醸造所を検索...">
-                </div>
-            </div>
-            
-            <div class="form-row">
-                <button type="submit" class="submit-btn">検索</button>
-                <button type="reset" class="reset-btn">リセット</button>
-            </div>
-        </form>
-    </div>
-    
-    <div id="beer-results">
-        <?php echo beer_results_display(); ?>
-    </div>
-    
-    <?php
-    return ob_get_clean();
-}
-add_shortcode('beer_search', 'beer_search_form_shortcode');
-
-// ビール検索結果を表示する関数
-function beer_results_display() {
-    $args = array(
-        'post_type' => 'award_beer',
-        'posts_per_page' => 50,  // 一度に表示する件数を制限
-        'paged' => get_query_var('paged') ? get_query_var('paged') : 1,
-        'tax_query' => array(),
-    );
-    
-    // 検索クエリ
-    if (isset($_GET['beer_search']) && !empty($_GET['beer_search'])) {
-        $search_term = sanitize_text_field($_GET['beer_search']);
-        $args['s'] = $search_term;
-    }
-    
-    // コンテストのフィルター
-    if (isset($_GET['beer_contest']) && !empty($_GET['beer_contest'])) {
-        $args['tax_query'][] = array(
-            'taxonomy' => 'beer_contest',
-            'field' => 'slug',
-            'terms' => sanitize_text_field($_GET['beer_contest']),
-        );
-    }
-    
-    // 年のフィルター
-    if (isset($_GET['beer_year']) && !empty($_GET['beer_year'])) {
-        $args['tax_query'][] = array(
-            'taxonomy' => 'beer_year',
-            'field' => 'slug',
-            'terms' => sanitize_text_field($_GET['beer_year']),
-        );
-    }
-    
-    // 国のフィルター
-    if (isset($_GET['beer_country']) && !empty($_GET['beer_country'])) {
-        $args['tax_query'][] = array(
-            'taxonomy' => 'beer_country',
-            'field' => 'slug',
-            'terms' => sanitize_text_field($_GET['beer_country']),
-        );
-    }
-    
-    // 州/県のフィルター
-    if (isset($_GET['beer_state']) && !empty($_GET['beer_state'])) {
-        $args['tax_query'][] = array(
-            'taxonomy' => 'beer_state',
-            'field' => 'slug',
-            'terms' => sanitize_text_field($_GET['beer_state']),
-        );
-    }
-    
-    // 都市のフィルター
-    if (isset($_GET['beer_city']) && !empty($_GET['beer_city'])) {
-        $args['tax_query'][] = array(
-            'taxonomy' => 'beer_city',
-            'field' => 'slug',
-            'terms' => sanitize_text_field($_GET['beer_city']),
-        );
-    }
-    
-    // カテゴリーのフィルター
-    if (isset($_GET['beer_category']) && !empty($_GET['beer_category'])) {
-        $args['tax_query'][] = array(
-            'taxonomy' => 'beer_category',
-            'field' => 'slug',
-            'terms' => sanitize_text_field($_GET['beer_category']),
-        );
-    }
-    
-    // メダルのフィルター
-    if (isset($_GET['beer_medal']) && !empty($_GET['beer_medal'])) {
-        $args['tax_query'][] = array(
-            'taxonomy' => 'beer_medal',
-            'field' => 'slug',
-            'terms' => sanitize_text_field($_GET['beer_medal']),
-        );
-    }
-    
-    // 複数のタクソノミークエリの関係設定
-    if (count($args['tax_query']) > 1) {
-        $args['tax_query']['relation'] = 'AND';
-    }
-    
-    $query = new WP_Query($args);
-    
-    ob_start();
-    
-    if ($query->have_posts()) :
-        ?>
-        <div class="beer-results-count">
-            <p><?php echo $query->found_posts; ?> 件の受賞ビールが見つかりました</p>
-        </div>
-        
-        <div class="beer-results-grid">
-            <?php while ($query->have_posts()) : $query->the_post(); ?>
-                <?php
-                // カスタムフィールドから値を取得
-                $brewery = get_post_meta(get_the_ID(), '_brewery', true);
-                $place = get_post_meta(get_the_ID(), '_place', true);
-                
-                // タクソノミーから値を取得
-                $contests = get_the_terms(get_the_ID(), 'beer_contest');
-                $contest = $contests ? $contests[0]->name : '';
-                
-                $years = get_the_terms(get_the_ID(), 'beer_year');
-                $year = $years ? $years[0]->name : '';
-                
-                $countries = get_the_terms(get_the_ID(), 'beer_country');
-                $country = $countries ? $countries[0]->name : '';
-                
-                $states = get_the_terms(get_the_ID(), 'beer_state');
-                $state = $states ? $states[0]->name : '';
-                
-                $cities = get_the_terms(get_the_ID(), 'beer_city');
-                $city = $cities ? $cities[0]->name : '';
-                
-                $categories = get_the_terms(get_the_ID(), 'beer_category');
-                $category = $categories ? $categories[0]->name : '';
-                
-                $medals = get_the_terms(get_the_ID(), 'beer_medal');
-                $medal = $medals ? $medals[0]->name : '';
-                
-                // メダルによって背景色のクラスを設定
-                $medal_class = '';
-                if (strtolower($medal) == 'gold' || $medal == '金' || $medal == 'Gold') {
-                    $medal_class = 'gold-medal';
-                } elseif (strtolower($medal) == 'silver' || $medal == '銀' || $medal == 'Silver') {
-                    $medal_class = 'silver-medal';
-                } elseif (strtolower($medal) == 'bronze' || $medal == '銅' || $medal == 'Bronze') {
-                    $medal_class = 'bronze-medal';
-                }
-                ?>
-                
-                <div class="beer-card <?php echo $medal_class; ?>">
-                    <div class="beer-medal"><?php echo $medal; ?></div>
-                    <h3 class="beer-title"><?php the_title(); ?></h3>
-                    <div class="beer-brewery"><?php echo esc_html($brewery); ?></div>
-                    <div class="beer-category"><?php echo esc_html($category); ?></div>
-                    <div class="beer-location">
-                        <?php if ($city): ?>
-                            <span class="beer-city"><?php echo esc_html($city); ?></span>
-                        <?php endif; ?>
-                        
-                        <?php if ($state): ?>
-                            <span class="beer-state"><?php echo esc_html($state); ?></span>
-                        <?php endif; ?>
-                        
-                        <?php if ($country): ?>
-                            <span class="beer-country"><?php echo esc_html($country); ?></span>
-                        <?php endif; ?>
-                    </div>
-                    <div class="beer-contest">
-                        <?php echo esc_html($contest); ?> <?php echo esc_html($year); ?>
-                    </div>
-                </div>
-            <?php endwhile; ?>
-        </div>
-        
-        <?php
-        // ページネーション
-        $big = 999999999;
-        echo '<div class="beer-pagination">';
-        echo paginate_links(array(
-            'base' => str_replace($big, '%#%', esc_url(get_pagenum_link($big))),
-            'format' => '?paged=%#%',
-            'current' => max(1, get_query_var('paged')),
-            'total' => $query->max_num_pages,
-            'prev_text' => '&laquo; 前へ',
-            'next_text' => '次へ &raquo;',
+            'menu_position' => 5,
+            'rewrite' => array('slug' => 'beer-awards'),
+            'show_in_rest' => true, // REST API対応
         ));
-        echo '</div>';
+    }
+    
+    // 分類の登録
+    public function register_taxonomies() {
+        // コンテスト（大会）タクソノミー
+        register_taxonomy(
+            'beer_contest',
+            'award_beer',
+            array(
+                'label' => __('コンテスト', 'regional-beer-awards'),
+                'hierarchical' => true,
+                'show_admin_column' => true,
+                'show_in_rest' => true,
+            )
+        );
+        
+        // 開催年タクソノミー
+        register_taxonomy(
+            'beer_year',
+            'award_beer',
+            array(
+                'label' => __('開催年', 'regional-beer-awards'),
+                'hierarchical' => true,
+                'show_admin_column' => true,
+                'show_in_rest' => true,
+            )
+        );
+        
+        // カテゴリータクソノミー
+        register_taxonomy(
+            'beer_category',
+            'award_beer',
+            array(
+                'label' => __('ビールカテゴリー', 'regional-beer-awards'),
+                'hierarchical' => true,
+                'show_admin_column' => true,
+                'show_in_rest' => true,
+            )
+        );
+        
+        // 国タクソノミー
+        register_taxonomy(
+            'beer_country',
+            'award_beer',
+            array(
+                'label' => __('国', 'regional-beer-awards'),
+                'hierarchical' => true,
+                'show_admin_column' => true,
+                'show_in_rest' => true,
+            )
+        );
+        
+        // 都道府県タクソノミー
+        register_taxonomy(
+            'beer_state',
+            'award_beer',
+            array(
+                'label' => __('都道府県/州', 'regional-beer-awards'),
+                'hierarchical' => true,
+                'show_in_rest' => true,
+            )
+        );
+        
+        // 都市タクソノミー
+        register_taxonomy(
+            'beer_city',
+            'award_beer',
+            array(
+                'label' => __('都市', 'regional-beer-awards'),
+                'hierarchical' => true,
+                'show_in_rest' => true,
+            )
+        );
+        
+        // 受賞メダルタクソノミー
+        register_taxonomy(
+            'beer_medal',
+            'award_beer',
+            array(
+                'label' => __('メダル', 'regional-beer-awards'),
+                'hierarchical' => true,
+                'show_admin_column' => true,
+                'show_in_rest' => true,
+            )
+        );
+    }
+    
+    // メタボックスの追加
+    public function add_meta_boxes() {
+        add_meta_box(
+            'beer_details',
+            __('ビール詳細情報', 'regional-beer-awards'),
+            array($this, 'meta_box_callback'),
+            'award_beer',
+            'normal',
+            'high'
+        );
+    }
+    
+    // メタボックスの表示
+    public function meta_box_callback($post) {
+        wp_nonce_field(basename(__FILE__), 'beer_details_nonce');
+        
+        // カスタムフィールドから値を取得
+        $brewery = get_post_meta($post->ID, '_brewery', true);
+        $place = get_post_meta($post->ID, '_place', true);
+        
         ?>
-        
-        <?php wp_reset_postdata(); ?>
-    <?php else : ?>
-        <div class="no-results">
-            <p>条件に一致する受賞ビールはありませんでした。検索条件を変更してお試しください。</p>
-        </div>
-    <?php endif;
-    
-    return ob_get_clean();
-}
-
-// AJAXで検索結果を更新する処理
-function update_beer_results() {
-    check_ajax_referer('beer_filter_nonce', 'nonce');
-    echo beer_results_display();
-    wp_die();
-}
-add_action('wp_ajax_update_beer_results', 'update_beer_results');
-add_action('wp_ajax_nopriv_update_beer_results', 'update_beer_results');
-
-// スクリプトとスタイルの読み込み
-function enqueue_beer_scripts() {
-    wp_enqueue_style('beer-awards-style', plugin_dir_url(__FILE__) . 'css/beer-awards.css');
-    wp_enqueue_script('beer-awards-script', plugin_dir_url(__FILE__) . 'js/beer-awards.js', array('jquery'), '2.0', true);
-    
-    wp_localize_script('beer-awards-script', 'beer_awards_ajax', array(
-        'ajax_url' => admin_url('admin-ajax.php'),
-        'nonce' => wp_create_nonce('beer_filter_nonce')
-    ));
-}
-add_action('wp_enqueue_scripts', 'enqueue_beer_scripts');
-
-// AJAX用の関数：国に基づいて州/県を取得
-function get_states_by_country() {
-    check_ajax_referer('beer_filter_nonce', 'nonce');
-    
-    $country_slug = isset($_POST['country']) ? sanitize_text_field($_POST['country']) : '';
-    
-    if (empty($country_slug)) {
-        wp_send_json_error('国が指定されていません');
-    }
-    
-    // 国のterm_idを取得
-    $country = get_term_by('slug', $country_slug, 'beer_country');
-    
-    if (!$country) {
-        wp_send_json_error('指定された国が見つかりません');
-    }
-    
-    // この国に関連する州/県を検索
-    $states = array();
-    
-    // 国に紐づく投稿IDを取得
-    $posts = get_posts(array(
-        'post_type' => 'award_beer',
-        'posts_per_page' => -1,
-        'tax_query' => array(
-            array(
-                'taxonomy' => 'beer_country',
-                'field' => 'term_id',
-                'terms' => $country->term_id,
-            ),
-        ),
-    ));
-    
-    // 投稿から関連する州/県を収集
-    $state_ids = array();
-    foreach ($posts as $post) {
-        $post_states = wp_get_object_terms($post->ID, 'beer_state');
-        foreach ($post_states as $state) {
-            $state_ids[$state->term_id] = $state;
-        }
-    }
-    
-    foreach ($state_ids as $state) {
-        $states[] = array(
-            'term_id' => $state->term_id,
-            'name' => $state->name,
-            'slug' => $state->slug,
-        );
-    }
-    
-    // 名前でソート
-    usort($states, function($a, $b) {
-        return strcmp($a['name'], $b['name']);
-    });
-    
-    wp_send_json($states);
-}
-add_action('wp_ajax_get_states_by_country', 'get_states_by_country');
-add_action('wp_ajax_nopriv_get_states_by_country', 'get_states_by_country');
-
-// AJAX用の関数：州/県に基づいて都市を取得
-function get_cities_by_state() {
-    check_ajax_referer('beer_filter_nonce', 'nonce');
-    
-    $state_slug = isset($_POST['state']) ? sanitize_text_field($_POST['state']) : '';
-    
-    if (empty($state_slug)) {
-        wp_send_json_error('州/県が指定されていません');
-    }
-    
-    // 州/県のterm_idを取得
-    $state = get_term_by('slug', $state_slug, 'beer_state');
-    
-    if (!$state) {
-        wp_send_json_error('指定された州/県が見つかりません');
-    }
-    
-    // この州/県に関連する都市を検索
-    $cities = array();
-    
-    // 州/県に紐づく投稿IDを取得
-    $posts = get_posts(array(
-        'post_type' => 'award_beer',
-        'posts_per_page' => -1,
-        'tax_query' => array(
-            array(
-                'taxonomy' => 'beer_state',
-                'field' => 'term_id',
-                'terms' => $state->term_id,
-            ),
-        ),
-    ));
-    
-    // 投稿から関連する都市を収集
-    $city_ids = array();
-    foreach ($posts as $post) {
-        $post_cities = wp_get_object_terms($post->ID, 'beer_city');
-        foreach ($post_cities as $city) {
-            $city_ids[$city->term_id] = $city;
-        }
-    }
-    
-    foreach ($city_ids as $city) {
-        $cities[] = array(
-            'term_id' => $city->term_id,
-            'name' => $city->name,
-            'slug' => $city->slug,
-        );
-    }
-    
-    // 名前でソート
-    usort($cities, function($a, $b) {
-        return strcmp($a['name'], $b['name']);
-    });
-    
-    wp_send_json($cities);
-}
-add_action('wp_ajax_get_cities_by_state', 'get_cities_by_state');
-add_action('wp_ajax_nopriv_get_cities_by_state', 'get_cities_by_state');
-
-// 管理メニューに「ビールデータインポート」を追加
-function add_beer_import_menu() {
-    add_submenu_page(
-        'edit.php?post_type=award_beer',
-        'ビールデータインポート',
-        'データインポート',
-        'manage_options',
-        'beer-data-import',
-        'beer_import_page'
-    );
-}
-add_action('admin_menu', 'add_beer_import_menu');
-
-// インポートページの内容
-function beer_import_page() {
-    ?>
-    <div class="wrap">
-        <h1>ビール受賞データのインポート</h1>
-        
-        <h2 class="nav-tab-wrapper">
-            <a href="?page=beer-data-import&tab=csv" class="nav-tab <?php echo !isset($_GET['tab']) || $_GET['tab'] == 'csv' ? 'nav-tab-active' : ''; ?>">CSVインポート</a>
-            <a href="?page=beer-data-import&tab=json" class="nav-tab <?php echo isset($_GET['tab']) && $_GET['tab'] == 'json' ? 'nav-tab-active' : ''; ?>">JSONインポート</a>
-            <a href="?page=beer-data-import&tab=markdown" class="nav-tab <?php echo isset($_GET['tab']) && $_GET['tab'] == 'markdown' ? 'nav-tab-active' : ''; ?>">マークダウン変換</a>
-        </h2>
-        
-        <div class="tab-content">
-            <?php
-            $tab = isset($_GET['tab']) ? $_GET['tab'] : 'csv';
-            
-            switch ($tab) {
-                case 'json':
-                    display_json_import_form();
-                    break;
-                case 'markdown':
-                    display_markdown_converter();
-                    break;
-                default: // csv
-                    display_csv_import_form();
-                    break;
-            }
-            ?>
-        </div>
-    </div>
-    <?php
-}
-
-// CSVインポートフォームの表示
-function display_csv_import_form() {
-    ?>
-    <div class="beer-import-section">
-        <h3>CSVファイルからビールの受賞データをインポート</h3>
-        <p>CSVファイルのフォーマット：Award, Beer Name, Brewery, Category, City, State, Country, Place</p>
-        
-        <form method="post" enctype="multipart/form-data">
-            <table class="form-table">
-                <tr>
-                    <th scope="row"><label for="contest_name">コンテスト名</label></th>
-                    <td>
-                        <input type="text" name="contest_name" id="contest_name" class="regular-text" required>
-                        <p class="description">例：World Beer Cup, GABF, IBA など</p>
-                    </td>
-                </tr>
-                <tr>
-                    <th scope="row"><label for="contest_year">開催年</label></th>
-                    <td>
-                        <input type="number" name="contest_year" id="contest_year" class="small-text" min="1900" max="2100" value="<?php echo date('Y'); ?>" required>
-                    </td>
-                </tr>
-                <tr>
-                    <th scope="row"><label for="csv_file">CSVファイル</label></th>
-                    <td><input type="file" name="csv_file" id="csv_file" accept=".csv" required></td>
-                </tr>
-                <tr>
-                    <th scope="row"><label for="csv_encoding">文字コード</label></th>
-                    <td>
-                        <select name="csv_encoding" id="csv_encoding">
-                            <option value="UTF-8">UTF-8</option>
-                            <option value="SJIS">Shift-JIS</option>
-                            <option value="EUC-JP">EUC-JP</option>
-                        </select>
-                    </td>
-                </tr>
-            </table>
-            
-            <?php wp_nonce_field('beer_csv_import_action', 'beer_import_nonce'); ?>
-            <p class="submit">
-                <input type="submit" name="csv_import_submit" class="button button-primary" value="CSVをインポート">
+        <div class="beer-meta-fields">
+            <p>
+                <label for="brewery"><?php _e('醸造所:', 'regional-beer-awards'); ?></label>
+                <input type="text" id="brewery" name="brewery" value="<?php echo esc_attr($brewery); ?>" class="widefat">
             </p>
-        </form>
-    </div>
-    <?php
+            <p>
+                <label for="place"><?php _e('順位:', 'regional-beer-awards'); ?></label>
+                <input type="number" id="place" name="place" value="<?php echo esc_attr($place); ?>" min="1" max="3">
+            </p>
+        </div>
+        <?php
+    }
     
-    // インポート処理
-    if (isset($_POST['csv_import_submit']) && isset($_FILES['csv_file'])) {
+    // メタボックスデータの保存
+    public function save_meta_box_data($post_id) {
+        // チェックボックスの確認
+        if (!isset($_POST['beer_details_nonce']) || !wp_verify_nonce($_POST['beer_details_nonce'], basename(__FILE__))) {
+            return $post_id;
+        }
+        
+        // 自動保存チェック
+        if (defined('DOING_AUTOSAVE') && DOING_AUTOSAVE) {
+            return $post_id;
+        }
+        
+        // 権限の確認
+        if ('award_beer' == $_POST['post_type'] && !current_user_can('edit_post', $post_id)) {
+            return $post_id;
+        }
+        
+        // フィールドの更新
+        if (isset($_POST['brewery'])) {
+            update_post_meta($post_id, '_brewery', sanitize_text_field($_POST['brewery']));
+        }
+        
+        if (isset($_POST['place'])) {
+            update_post_meta($post_id, '_place', intval($_POST['place']));
+        }
+    }
+    
+    // 管理画面のカラム設定
+    public function set_custom_columns($columns) {
+        $new_columns = array();
+        $new_columns['cb'] = $columns['cb'];
+        $new_columns['title'] = __('ビール名', 'regional-beer-awards');
+        $new_columns['brewery'] = __('醸造所', 'regional-beer-awards');
+        $new_columns['taxonomy-beer_medal'] = __('メダル', 'regional-beer-awards');
+        $new_columns['taxonomy-beer_category'] = __('カテゴリー', 'regional-beer-awards');
+        $new_columns['taxonomy-beer_country'] = __('国', 'regional-beer-awards');
+        $new_columns['taxonomy-beer_contest'] = __('コンテスト', 'regional-beer-awards');
+        $new_columns['taxonomy-beer_year'] = __('年', 'regional-beer-awards');
+        
+        return $new_columns;
+    }
+    
+    // カスタムカラムの内容表示
+    public function custom_column_content($column, $post_id) {
+        switch ($column) {
+            case 'brewery':
+                echo esc_html(get_post_meta($post_id, '_brewery', true));
+                break;
+        }
+    }
+    
+    // ソート可能なカラム設定
+    public function sortable_columns($columns) {
+        $columns['brewery'] = 'brewery';
+        $columns['taxonomy-beer_medal'] = 'taxonomy-beer_medal';
+        $columns['taxonomy-beer_category'] = 'taxonomy-beer_category';
+        $columns['taxonomy-beer_country'] = 'taxonomy-beer_country';
+        $columns['taxonomy-beer_contest'] = 'taxonomy-beer_contest';
+        $columns['taxonomy-beer_year'] = 'taxonomy-beer_year';
+        
+        return $columns;
+    }
+}
+
+/**
+ * File: regional-beer-awards/includes/class-beer-awards-admin.php
+ * Description: Admin functionality and import/export options
+ */
+<?php
+/**
+ * 管理画面の機能を管理するクラス
+ */
+class Beer_Awards_Admin {
+    public function __construct() {
+        // 管理メニューの追加
+        add_action('admin_menu', array($this, 'add_admin_menu'));
+        
+        // インポート・エクスポート処理のハンドリング
+        add_action('admin_init', array($this, 'handle_import_export'));
+        
+        // AJAXハンドラーの登録
+        add_action('wp_ajax_convert_markdown_to_json', array($this, 'ajax_convert_markdown_to_json'));
+    }
+    
+    // 管理メニューの追加
+    public function add_admin_menu() {
+        // データインポートページ
+        add_submenu_page(
+            'edit.php?post_type=award_beer', // 親メニュー
+            __('ビールデータインポート', 'regional-beer-awards'), // ページタイトル
+            __('データインポート', 'regional-beer-awards'), // メニュータイトル
+            'manage_options', // 権限
+            'beer-data-import', // ページスラッグ
+            array($this, 'render_import_page') // 表示関数
+        );
+        
+        // 設定ページ
+        add_submenu_page(
+            'edit.php?post_type=award_beer',
+            __('設定', 'regional-beer-awards'),
+            __('設定', 'regional-beer-awards'),
+            'manage_options',
+            'beer-settings',
+            array($this, 'render_settings_page')
+        );
+    }
+    
+    // インポートページの表示
+    public function render_import_page() {
+        // テンプレートを読み込み
+        require_once RBA_PLUGIN_DIR . 'templates/admin/import-page.php';
+    }
+    
+    // 設定ページの表示
+    public function render_settings_page() {
+        // テンプレートを読み込み
+        require_once RBA_PLUGIN_DIR . 'templates/admin/settings-page.php';
+    }
+    
+    // インポート・エクスポート処理
+    public function handle_import_export() {
+        // インポート処理
+        if (isset($_POST['csv_import_submit']) && isset($_FILES['csv_file'])) {
+            $this->handle_csv_import();
+        }
+        
+        if (isset($_POST['json_import_submit']) && isset($_FILES['json_file'])) {
+            $this->handle_json_import();
+        }
+        
+        // エクスポート処理
+        if (isset($_GET['action']) && $_GET['action'] == 'export') {
+            if (isset($_GET['format']) && $_GET['format'] == 'csv') {
+                $this->export_csv();
+            } else if (isset($_GET['format']) && $_GET['format'] == 'json') {
+                $this->export_json();
+            }
+        }
+    }
+    
+    // CSV形式のインポート処理
+    private function handle_csv_import() {
         if (!wp_verify_nonce($_POST['beer_import_nonce'], 'beer_csv_import_action')) {
-            wp_die('セキュリティチェックに失敗しました。');
+            wp_die(__('セキュリティチェックに失敗しました。', 'regional-beer-awards'));
         }
         
-        $file = $_FILES['csv_file'];
-        $contest_name = sanitize_text_field($_POST['contest_name']);
-        $contest_year = intval($_POST['contest_year']);
-        $encoding = sanitize_text_field($_POST['csv_encoding']);
+        // CSVImporterクラスを使用して処理
+        require_once RBA_PLUGIN_DIR . 'includes/importers/class-csv-importer.php';
+        $importer = new Beer_Awards_CSV_Importer();
+        $result = $importer->import($_FILES['csv_file'], $_POST['contest_name'], $_POST['contest_year'], $_POST['csv_encoding']);
         
-        // ファイルのバリデーション
-        if ($file['error'] !== UPLOAD_ERR_OK) {
-            echo '<div class="error"><p>ファイルのアップロードに失敗しました。エラーコード: ' . $file['error'] . '</p></div>';
-            return;
-        }
-        
-        // インポート処理を実行
-        $result = import_beer_awards_from_csv($file['tmp_name'], $contest_name, $contest_year, $encoding);
-        
-        if ($result['success']) {
-            echo '<div class="updated"><p>' . $result['message'] . '<br>処理 ' . $result['processed'] . ' 件, 作成 ' . $result['created'] . ' 件, 更新 ' . $result['updated'] . ' 件, スキップ ' . $result['skipped'] . ' 件</p></div>';
-            
-            if (!empty($result['errors'])) {
-                echo '<div class="error"><p>以下のエラーが発生しました：</p><ul>';
-                foreach ($result['errors'] as $error) {
-                    echo '<li>' . esc_html($error) . '</li>';
-                }
-                echo '</ul></div>';
-            }
-        } else {
-            echo '<div class="error"><p>' . $result['message'] . '</p></div>';
-        }
+        // 結果を通知
+        $this->show_import_result($result);
     }
-}
-
-// JSONインポートフォームの表示
-function display_json_import_form() {
-    ?>
-    <div class="beer-import-section">
-        <h3>JSONファイルからビールの受賞データをインポート</h3>
-        <p>JSONファイルの形式については、サンプルダウンロードをご参照ください。</p>
-        
-        <form method="post" enctype="multipart/form-data">
-            <table class="form-table">
-                <tr>
-                    <th scope="row"><label for="json_file">JSONファイル</label></th>
-                    <td><input type="file" name="json_file" id="json_file" accept=".json" required></td>
-                </tr>
-            </table>
-            
-            <?php wp_nonce_field('beer_json_import_action', 'beer_json_import_nonce'); ?>
-            <p class="submit">
-                <input type="submit" name="json_import_submit" class="button button-primary" value="JSONをインポート">
-            </p>
-        </form>
-        
-        <div class="beer-sample-json">
-            <h4>JSONサンプル形式</h4>
-            <pre>
-{
-  "contest": "World Beer Cup",
-  "year": "2025",
-  "awards": [
-    {
-      "medal": "Gold",
-      "beer_name": "Clubhaus Lager",
-      "brewery": "Von Ebert Brewing",
-      "category": "American Light Lager",
-      "city": "Portland",
-      "state": "OR",
-      "country": "USA",
-      "place": 1
-    },
-    ...
-  ]
-}
-            </pre>
-            <a href="#" class="button" id="download-sample-json">サンプルJSONをダウンロード</a>
-        </div>
-    </div>
     
-    <script>
-    jQuery(document).ready(function($) {
-        // サンプルJSONをダウンロード
-        $('#download-sample-json').on('click', function(e) {
-            e.preventDefault();
-            
-            var sampleJson = {
-                "contest": "World Beer Cup",
-                "year": "2025",
-                "awards": [
-                    {
-                        "medal": "Gold",
-                        "beer_name": "Clubhaus Lager",
-                        "brewery": "Von Ebert Brewing",
-                        "category": "American Light Lager",
-                        "city": "Portland",
-                        "state": "OR",
-                        "country": "USA",
-                        "place": 1
-                    },
-                    {
-                        "medal": "Silver",
-                        "beer_name": "Old Fortwaukee",
-                        "brewery": "Coopersmith's Pub & Brewing",
-                        "category": "American Light Lager",
-                        "city": "Fort Collins",
-                        "state": "CO",
-                        "country": "USA",
-                        "place": 2
-                    }
-                ]
-            };
-            
-            var dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(sampleJson, null, 2));
-            var downloadAnchorNode = document.createElement('a');
-            downloadAnchorNode.setAttribute("href", dataStr);
-            downloadAnchorNode.setAttribute("download", "sample_beer_awards.json");
-            document.body.appendChild(downloadAnchorNode);
-            downloadAnchorNode.click();
-            downloadAnchorNode.remove();
-        });
-    });
-    </script>
-    <?php
-    
-    // インポート処理
-    if (isset($_POST['json_import_submit']) && isset($_FILES['json_file'])) {
+    // JSON形式のインポート処理
+    private function handle_json_import() {
         if (!wp_verify_nonce($_POST['beer_json_import_nonce'], 'beer_json_import_action')) {
-            wp_die('セキュリティチェックに失敗しました。');
+            wp_die(__('セキュリティチェックに失敗しました。', 'regional-beer-awards'));
         }
         
-        $file = $_FILES['json_file'];
+        // JSONImporterクラスを使用して処理
+        require_once RBA_PLUGIN_DIR . 'includes/importers/class-json-importer.php';
+        $importer = new Beer_Awards_JSON_Importer();
+        $result = $importer->import($_FILES['json_file']);
         
-        // ファイルのバリデーション
-        if ($file['error'] !== UPLOAD_ERR_OK) {
-            echo '<div class="error"><p>ファイルのアップロードに失敗しました。エラーコード: ' . $file['error'] . '</p></div>';
+        // 結果を通知
+        $this->show_import_result($result);
+    }
+    
+    // インポート結果の表示
+    private function show_import_result($result) {
+        if ($result['success']) {
+            add_settings_error(
+                'beer_import',
+                'beer_import_success',
+                sprintf(
+                    __('インポート完了: 処理 %d 件, 作成 %d 件, 更新 %d 件, スキップ %d 件', 'regional-beer-awards'),
+                    $result['processed'],
+                    $result['created'],
+                    $result['updated'],
+                    $result['skipped']
+                ),
+                'updated'
+            );
+            
+            if (!empty($result['errors'])) {
+                foreach ($result['errors'] as $error) {
+                    add_settings_error(
+                        'beer_import',
+                        'beer_import_error',
+                        $error,
+                        'error'
+                    );
+                }
+            }
+        } else {
+            add_settings_error(
+                'beer_import',
+                'beer_import_error',
+                $result['message'],
+                'error'
+            );
+        }
+    }
+    
+    // CSV形式のエクスポート
+    private function export_csv() {
+        // 権限チェック
+        if (!current_user_can('manage_options')) {
+            wp_die(__('この機能を使用する権限がありません。', 'regional-beer-awards'));
+        }
+        
+        // CSVExporterクラスを使用して処理
+        require_once RBA_PLUGIN_DIR . 'includes/exporters/class-csv-exporter.php';
+        $exporter = new Beer_Awards_CSV_Exporter();
+        $exporter->export();
+        
+        // エクスポート後は終了
+        exit;
+    }
+    
+    // JSON形式のエクスポート
+    private function export_json() {
+        // 権限チェック
+        if (!current_user_can('manage_options')) {
+            wp_die(__('この機能を使用する権限がありません。', 'regional-beer-awards'));
+        }
+        
+        // JSONExporterクラスを使用して処理
+        require_once RBA_PLUGIN_DIR . 'includes/exporters/class-json-exporter.php';
+        $exporter = new Beer_Awards_JSON_Exporter();
+        $exporter->export();
+        
+        // エクスポート後は終了
+        exit;
+    }
+    
+    // マークダウンからJSONへの変換AJAX処理
+    public function ajax_convert_markdown_to_json() {
+        check_ajax_referer('beer_filter_nonce', 'nonce');
+        
+        $markdown = isset($_POST['markdown']) ? sanitize_textarea_field($_POST['markdown']) : '';
+        $contest_name = isset($_POST['contest_name']) ? sanitize_text_field($_POST['contest_name']) : '';
+        $contest_year = isset($_POST['contest_year']) ? sanitize_text_field($_POST['contest_year']) : '';
+        
+        if (empty($markdown) || empty($contest_name) || empty($contest_year)) {
+            wp_send_json_error(array('message' => __('入力項目がすべて入力されていることを確認してください。', 'regional-beer-awards')));
             return;
         }
         
-        // JSONファイルの処理
-        $result = import_beer_awards_from_json($file['tmp_name']);
+        // マークダウン変換クラスを使用
+        require_once RBA_PLUGIN_DIR . 'includes/importers/class-markdown-converter.php';
+        $converter = new Beer_Awards_Markdown_Converter();
+        $result = $converter->convert_to_json($markdown, $contest_name, $contest_year);
         
         if ($result['success']) {
-            echo '<div class="updated"><p>' . $result['message'] . '<br>処理 ' . $result['processed'] . ' 件, 作成 ' . $result['created'] . ' 件, 更新 ' . $result['updated'] . ' 件, スキップ ' . $result['skipped'] . ' 件</p></div>';
-            
-            if (!empty($result['errors'])) {
-                echo '<div class="error"><p>以下のエラーが発生しました：</p><ul>';
-                foreach ($result['errors'] as $error) {
-                    echo '<li>' . esc_html($error) . '</li>';
-                }
-                echo '</ul></div>';
-            }
+            wp_send_json_success(array(
+                'json' => $result['json'],
+                'message' => __('変換が完了しました！', 'regional-beer-awards')
+            ));
         } else {
-            echo '<div class="error"><p>' . $result['message'] . '</p></div>';
+            wp_send_json_error(array(
+                'message' => $result['message']
+            ));
         }
     }
 }
 
-// マークダウン変換ツールの表示
-function display_markdown_converter() {
-    ?>
-    <div class="beer-import-section">
-        <h3>マークダウンテーブルをJSONに変換</h3>
-        <p>マークダウン形式のテーブルをJSONに変換します。</p>
+/**
+ * File: regional-beer-awards/includes/class-beer-awards-shortcode.php
+ * Description: Registers and handles shortcodes
+ */
+<?php
+/**
+ * ショートコードを管理するクラス
+ */
+class Beer_Awards_Shortcode {
+    public function __construct() {
+        // ショートコードの登録
+        add_shortcode('beer_search', array($this, 'beer_search_shortcode'));
+        add_shortcode('brewery_awards', array($this, 'brewery_awards_shortcode'));
+        add_shortcode('beer_stats', array($this, 'beer_stats_shortcode'));
         
-        <div class="markdown-converter">
-            <div class="form-row">
-                <div class="form-group full-width">
-                    <label for="contest_name_md">コンテスト名</label>
-                    <input type="text" id="contest_name_md" class="regular-text" value="World Beer Cup">
-                </div>
-                <div class="form-group">
-                    <label for="contest_year_md">開催年</label>
-                    <input type="number" id="contest_year_md" class="small-text" min="1900" max="2100" value="2025">
-                </div>
-            </div>
-            
-            <div class="form-row">
-                <div class="form-group full-width">
-                    <label for="markdown_input">マークダウンテーブルを入力</label>
-                    <textarea id="markdown_input" rows="10" class="large-text code" placeholder="| Award | Beer Name | Brewery | Category | City | State | Country | Place |
-|-------|-----------|---------|----------|------|-------|---------|-------|
-| Gold | Clubhaus Lager | Von Ebert Brewing | American Light Lager | Portland | OR | USA | 1 |"></textarea>
-                </div>
-            </div>
-            
-            <div class="form-row">
-                <button type="button" id="convert_to_json" class="button button-primary">JSONに変換</button>
-            </div>
-            
-            <div class="form-row">
-                <div class="form-group full-width">
-                    <label for="json_output">JSON出力</label>
-                    <textarea id="json_output" rows="10" class="large-text code" readonly></textarea>
-                </div>
-            </div>
-            
-            <div class="form-row">
-                <button type="button" id="download_json" class="button" disabled>JSONをダウンロード</button>
-                <button type="button" id="copy_json" class="button" disabled>JSONをコピー</button>
-            </div>
-        </div>
-    </div>
+        // AJAXハンドラーの登録
+        add_action('wp_ajax_update_beer_results', array($this, 'ajax_update_beer_results'));
+        add_action('wp_ajax_nopriv_update_beer_results', array($this, 'ajax_update_beer_results'));
+        
+        add_action('wp_ajax_get_states_by_country', array($this, 'ajax_get_states_by_country'));
+        add_action('wp_ajax_nopriv_get_states_by_country', array($this, 'ajax_get_states_by_country'));
+        
+        add_action('wp_ajax_get_cities_by_state', array($this, 'ajax_get_cities_by_state'));
+        add_action('wp_ajax_nopriv_get_cities_by_state', array($this, 'ajax_get_cities_by_state'));
+    }
     
-    <style>
-    .form-row {
-        margin-bottom: 15px;
+    // ビール検索フォームのショートコード
+    public function beer_search_shortcode($atts) {
+        // ショートコード属性の取得
+        $attributes = shortcode_atts(
+            array(
+                'contest' => '',  // デフォルトのコンテストを指定可能
+                'year' => '',     // デフォルトの年を指定可能
+            ), 
+            $atts
+        );
+        
+        // テンプレートを読み込み
+        ob_start();
+        include(RBA_PLUGIN_DIR . 'templates/search-form.php');
+        return ob_get_clean();
     }
-    .form-group {
-        display: inline-block;
-        margin-right: 15px;
-        vertical-align: top;
-    }
-    .form-group.full-width {
-        display: block;
-        width: 100%;
-    }
-    .form-group label {
-        display: block;
-        margin-bottom: 5px;
-        font-weight: bold;
-    }
-    .markdown-converter textarea {
-        width: 100%;
-    }
-    </style>
     
-    <script>
-    jQuery(document).ready(function($) {
-        // マークダウンをJSONに変換
-        $('#convert_to_json').on('click', function() {
-            var markdown = $('#markdown_input').val();
-            var contestName = $('#contest_name_md').val();
-            var contestYear = $('#contest_year_md').val();
+    // 醸造所別の受賞履歴ショートコード
+    public function brewery_awards_shortcode($atts) {
+        $attributes = shortcode_atts(
+            array(
+                'brewery' => '',
+                'limit' => 50,
+            ), 
+            $atts
+        );
+        
+        if (empty($attributes['brewery'])) {
+            return '<p>' . __('醸造所名を指定してください。', 'regional-beer-awards') . '</p>';
+        }
+        
+        $args = array(
+            'post_type' => 'award_beer',
+            'posts_per_page' => $attributes['limit'],
+            'meta_query' => array(
+                array(
+                    'key' => '_brewery',
+                    'value' => $attributes['brewery'],
+                    'compare' => '='
+                )
+            )
+        );
+        
+        $query = new WP_Query($args);
+        
+        ob_start();
+        
+        if ($query->have_posts()) {
+            echo '<h2>' . esc_html($attributes['brewery']) . ' ' . __('の受賞履歴', 'regional-beer-awards') . '</h2>';
+            echo '<div class="brewery-awards-list">';
             
-            if (!markdown || !contestName || !contestYear) {
-                alert('全ての項目を入力してください。');
-                return;
+            while ($query->have_posts()) {
+                $query->the_post();
+                include(RBA_PLUGIN_DIR . 'templates/brewery-award-item.php');
             }
+            
+            echo '</div>';
+            wp_reset_postdata();
+        } else {
+            echo '<p>' . __('この醸造所の受賞記録は見つかりませんでした。', 'regional-beer-awards') . '</p>';
+        }
+        
+        return ob_get_clean();
+    }
+    
+    // 統計ダッシュボードのショートコード
+    public function beer_stats_shortcode($atts) {
+        $attributes = shortcode_atts(
+            array(
+                'contest' => '',
+                'year' => '',
+                'chart_type' => 'country', // country, category, medal
+            ), 
+            $atts
+        );
+        
+        // 統計データの収集処理
+        $stats_data = $this->collect_stats_data($attributes['contest'], $attributes['year'], $attributes['chart_type']);
+        
+        ob_start();
+        include(RBA_PLUGIN_DIR . 'templates/stats-dashboard.php');
+        return ob_get_clean();
+    }
+    
+    // 統計データの収集
+    private function collect_stats_data($contest, $year, $chart_type) {
+        $args = array(
+            'post_type' => 'award_beer',
+            'posts_per_page' => -1,
+            'tax_query' => array(),
+        );
+        
+        // コンテストで絞り込み
+        if (!empty($contest)) {
+            $args['tax_query'][] = array(
+                'taxonomy' => 'beer_contest',
+                'field' => 'slug',
+                'terms' => $contest,
+            );
+        }
+        
+        // 年で絞り込み
+        if (!empty($year)) {
+            $args['tax_query'][] = array(
+                'taxonomy' => 'beer_year',
+                'field' => 'slug',
+                'terms' => $year,
+            );
+        }
+        
+        $query = new WP_Query($args);
+        
+        $stats = array();
+        
+        if ($query->have_posts()) {
+            while ($query->have_posts()) {
+                $query->the_post();
+                
+                switch ($chart_type) {
+                    case 'country':
+                        $terms = get_the_terms(get_the_ID(), 'beer_country');
+                        if ($terms && !is_wp_error($terms)) {
+                            $country = $terms[0]->name;
+                            if (!isset($stats[$country])) {
+                                $stats[$country] = 0;
+                            }
+                            $stats[$country]++;
+                        }
+                        break;
+                        
+                    case 'category':
+                        $terms = get_the_terms(get_the_ID(), 'beer_category');
+                        if ($terms && !is_wp_error($terms)) {
+                            $category = $terms[0]->name;
+                            if (!isset($stats[$category])) {
+                                $stats[$category] = 0;
+                            }
+                            $stats[$category]++;
+                        }
+                        break;
+                        
+                    case 'medal':
+                        $terms = get_the_terms(get_the_ID(), 'beer_medal');
+                        if ($terms && !is_wp_error($terms)) {
+                            $medal = $terms[0]->name;
+                            if (!isset($stats[$medal])) {
+                                $stats[$medal] = 0;
+                            }
+                            $stats[$medal]++;
+                        }
+                        break;
+                }
+            }
+            
+            wp_reset_postdata();
+            
+            // 値の降順でソート
+            arsort($stats);
+            
+            // 上位10項目のみ
+            $stats = array_slice($stats, 0, 10);
+        }
+        
+        return $stats;
+    }
+    
+    // 検索結果を更新するAJAX処理
+    public function ajax_update_beer_results() {
+        check_ajax_referer('beer_filter_nonce', 'nonce');
+        
+        // フォームデータを解析
+        parse_str($_POST['formData'], $form_data);
+        
+        // クエリを構築
+        $args = array(
+            'post_type' => 'award_beer',
+            'posts_per_page' => isset($form_data['beer_per_page']) ? intval($form_data['beer_per_page']) : 50,
+            'paged' => isset($form_data['paged']) ? intval($form_data['paged']) : 1,
+            'tax_query' => array(),
+        );
+        
+        // 検索クエリ
+        if (isset($form_data['beer_search']) && !empty($form_data['beer_search'])) {
+            $args['s'] = sanitize_text_field($form_data['beer_search']);
+        }
+        
+        // タクソノミーフィルターを追加
+        if (isset($form_data['beer_contest']) && !empty($form_data['beer_contest'])) {
+            $args['tax_query'][] = array(
+                'taxonomy' => 'beer_contest',
+                'field' => 'slug',
+                'terms' => sanitize_text_field($form_data['beer_contest']),
+            );
+        }
+        
+        if (isset($form_data['beer_year']) && !empty($form_data['beer_year'])) {
+            $args['tax_query'][] = array(
+                'taxonomy' => 'beer_year',
+                'field' => 'slug',
+                'terms' => sanitize_text_field($form_data['beer_year']),
+            );
+        }
+        
+        if (isset($form_data['beer_country']) && !empty($form_data['beer_country'])) {
+            $args['tax_query'][] = array(
+                'taxonomy' => 'beer_country',
+                'field' => 'slug',
+                'terms' => sanitize_text_field($form_data['beer_country']),
+            );
+        }
+        
+        if (isset($form_data['beer_state']) && !empty($form_data['beer_state'])) {
+            $args['tax_query'][] = array(
+                'taxonomy' => 'beer_state',
+                'field' => 'slug',
+                'terms' => sanitize_text_field($form_data['beer_state']),
+            );
+        }
+        
+        if (isset($form_data['beer_city']) && !empty($form_data['beer_city'])) {
+            $args['tax_query'][] = array(
+                'taxonomy' => 'beer_city',
+                'field' => 'slug',
+                'terms' => sanitize_text_field($form_data['beer_city']),
+            );
+        }
+        
+        if (isset($form_data['beer_category']) && !empty($form_data['beer_category'])) {
+            $args['tax_query'][] = array(
+                'taxonomy' => 'beer_category',
+                'field' => 'slug',
+                'terms' => sanitize_text_field($form_data['beer_category']),
+            );
+        }
+        
+        if (isset($form_data['beer_medal']) && !empty($form_data['beer_medal'])) {
+            $args['tax_query'][] = array(
+                'taxonomy' => 'beer_medal',
+                'field' => 'slug',
+                'terms' => sanitize_text_field($form_data['beer_medal']),
+            );
+        }
+        
+        // タクソノミークエリの関係設定
+        if (count($args['tax_query']) > 1) {
+            $args['tax_query']['relation'] = 'AND';
+        }
+        
+        $query = new WP_Query($args);
+        
+        ob_start();
+        
+        if ($query->have_posts()) {
+            // 結果数と並べ替えオプションを表示
+            include(RBA_PLUGIN_DIR . 'templates/results-header.php');
+            
+            // 設定に基づいてビューを選択
+            $view_type = 'grid'; // デフォルト
+            include(RBA_PLUGIN_DIR . 'templates/' . $view_type . '-view.php');
+            
+            // ページネーション
+            include(RBA_PLUGIN_DIR . 'templates/pagination.php');
+            
+            wp_reset_postdata();
+        } else {
+            include(RBA_PLUGIN_DIR . 'templates/no-results.php');
+        }
+        
+        $html = ob_get_clean();
+        echo $html;
+        wp_die();
+    }
+    
+    // 国に基づいて州/県を取得するAJAX処理
+    public function ajax_get_states_by_country() {
+        check_ajax_referer('beer_filter_nonce', 'nonce');
+        
+        $country_slug = isset($_POST['country']) ? sanitize_text_field($_POST['country']) : '';
+        
+        if (empty($country_slug)) {
+            wp_send_json_error(__('国が指定されていません', 'regional-beer-awards'));
+        }
+        
+        // 国のterm_idを取得
+        $country = get_term_by('slug', $country_slug, 'beer_country');
+        
+        if (!$country) {
+            wp_send_json_error(__('指定された国が見つかりません', 'regional-beer-awards'));
+        }
+        
+        // この国に関連する州/県を検索
+        $posts = get_posts(array(
+            'post_type' => 'award_beer',
+            'posts_per_page' => -1,
+            'tax_query' => array(
+                array(
+                    'taxonomy' => 'beer_country',
+                    'field' => 'term_id',
+                    'terms' => $country->term_id,
+                ),
+            ),
+        ));
+        
+        // 投稿から関連する州/県を収集
+        $state_ids = array();
+        foreach ($posts as $post) {
+            $post_states = wp_get_object_terms($post->ID, 'beer_state');
+            foreach ($post_states as $state) {
+                $state_ids[$state->term_id] = $state;
+            }
+        }
+        
+        $states = array();
+        foreach ($state_ids as $state) {
+            $states[] = array(
+                'term_id' => $state->term_id,
+                'name' => $state->name,
+                'slug' => $state->slug,
+            );
+        }
+        
+        // 名前でソート
+        usort($states, function($a, $b) {
+            return strcmp($a['name'], $b['name']);
+        });
+        
+        wp_send_json($states);
+    }
+    
+    // 州/県に基づいて都市を取得するAJAX処理
+    public function ajax_get_cities_by_state() {
+        check_ajax_referer('beer_filter_nonce', 'nonce');
+        
+        $state_slug = isset($_POST['state']) ? sanitize_text_field($_POST['state']) : '';
+        
+        if (empty($state_slug)) {
+            wp_send_json_error(__('州/県が指定されていません', 'regional-beer-awards'));
+        }
+        
+        // 州/県のterm_idを取得
+        $state = get_term_by('slug', $state_slug, 'beer_state');
+        
+        if (!$state) {
+            wp_send_json_error(__('指定された州/県が見つかりません', 'regional-beer-awards'));
+        }
+        
+        // この州/県に関連する都市を検索
+        $posts = get_posts(array(
+            'post_type' => 'award_beer',
+            'posts_per_page' => -1,
+            'tax_query' => array(
+                array(
+                    'taxonomy' => 'beer_state',
+                    'field' => 'term_id',
+                    'terms' => $state->term_id,
+                ),
+            ),
+        ));
+        
+        // 投稿から関連する都市を収集
+        $city_ids = array();
+        foreach ($posts as $post) {
+            $post_cities = wp_get_object_terms($post->ID, 'beer_city');
+            foreach ($post_cities as $city) {
+                $city_ids[$city->term_id] = $city;
+            }
+        }
+        
+        $cities = array();
+        foreach ($city_ids as $city) {
+            $cities[] = array(
+                'term_id' => $city->term_id,
+                'name' => $city->name,
+                'slug' => $city->slug,
+            );
+        }
+        
+        // 名前でソート
+        usort($cities, function($a, $b) {
+            return strcmp($a['name'], $b['name']);
+        });
+        
+        wp_send_json($cities);
+    }
+}
+
+/**
+ * File: regional-beer-awards/includes/class-beer-awards-widget.php
+ * Description: Custom widgets for displaying beer awards
+ */
+<?php
+/**
+ * ウィジェットを管理するクラス
+ */
+class Beer_Awards_Widget extends WP_Widget {
+    public function __construct() {
+        parent::__construct(
+            'beer_awards_widget',
+            __('受賞ビール表示', 'regional-beer-awards'),
+            array('description' => __('受賞ビールを表示するウィジェット', 'regional-beer-awards'))
+        );
+        
+        // ウィジェットの登録
+        add_action('widgets_init', array($this, 'register_widgets'));
+    }
+    
+    // ウィジェットの登録
+    public function register_widgets() {
+        register_widget('Beer_Awards_Widget');
+    }
+    
+    // ウィジェットの表示内容
+    public function widget($args, $instance) {
+        $title = !empty($instance['title']) ? apply_filters('widget_title', $instance['title']) : '';
+        $contest = !empty($instance['contest']) ? $instance['contest'] : '';
+        $year = !empty($instance['year']) ? $instance['year'] : '';
+        $medal = !empty($instance['medal']) ? $instance['medal'] : '';
+        $limit = !empty($instance['limit']) ? intval($instance['limit']) : 5;
+        
+        echo $args['before_widget'];
+        
+        if (!empty($title)) {
+            echo $args['before_title'] . $title . $args['after_title'];
+        }
+        
+        // 受賞ビールの取得
+        $query_args = array(
+            'post_type' => 'award_beer',
+            'posts_per_page' => $limit,
+            'tax_query' => array(),
+        );
+        
+        // コンテストで絞り込み
+        if (!empty($contest)) {
+            $query_args['tax_query'][] = array(
+                'taxonomy' => 'beer_contest',
+                'field' => 'slug',
+                'terms' => $contest,
+            );
+        }
+        
+        // 年で絞り込み
+        if (!empty($year)) {
+            $query_args['tax_query'][] = array(
+                'taxonomy' => 'beer_year',
+                'field' => 'slug',
+                'terms' => $year,
+            );
+        }
+        
+        // メダルで絞り込み
+        if (!empty($medal)) {
+            $query_args['tax_query'][] = array(
+                'taxonomy' => 'beer_medal',
+                'field' => 'slug',
+                'terms' => $medal,
+            );
+        }
+        
+        // タクソノミークエリの関係設定
+        if (count($query_args['tax_query']) > 1) {
+            $query_args['tax_query']['relation'] = 'AND';
+        }
+        
+        $query = new WP_Query($query_args);
+        
+        if ($query->have_posts()) {
+            echo '<ul class="beer-awards-widget-list">';
+            
+            while ($query->have_posts()) {
+                $query->the_post();
+                echo '<li class="beer-award-item">';
+                
+                // メダル
+                $medals = get_the_terms(get_the_ID(), 'beer_medal');
+                if ($medals && !is_wp_error($medals)) {
+                    $medal_class = strtolower($medals[0]->name) . '-medal';
+                    echo '<span class="medal-icon ' . $medal_class . '">' . $medals[0]->name . '</span>';
+                }
+                
+                // ビール名
+                echo '<a href="' . get_permalink() . '">' . get_the_title() . '</a>';
+                
+                // 醸造所
+                $brewery = get_post_meta(get_the_ID(), '_brewery', true);
+                if ($brewery) {
+                    echo '<span class="beer-brewery">' . $brewery . '</span>';
+                }
+                
+                echo '</li>';
+            }
+            
+            echo '</ul>';
+            
+            wp_reset_postdata();
+        } else {
+            echo '<p>' . __('該当する受賞ビールはありません。', 'regional-beer-awards') . '</p>';
+        }
+        
+        echo $args['after_widget'];
+    }
+    
+    // ウィジェットのフォーム表示
+    public function form($instance) {
+        $title = !empty($instance['title']) ? $instance['title'] : __('受賞ビール', 'regional-beer-awards');
+        $contest = !empty($instance['contest']) ? $instance['contest'] : '';
+        $year = !empty($instance['year']) ? $instance['year'] : '';
+        $medal = !empty($instance['medal']) ? $instance['medal'] : '';
+        $limit = !empty($instance['limit']) ? intval($instance['limit']) : 5;
+        
+        // コンテスト一覧を取得
+        $contests = get_terms(array(
+            'taxonomy' => 'beer_contest',
+            'hide_empty' => true,
+        ));
+        
+        // 年の一覧を取得
+        $years = get_terms(array(
+            'taxonomy' => 'beer_year',
+            'hide_empty' => true,
+            'order' => 'DESC',
+        ));
+        
+        // メダルの一覧を取得
+        $medals = get_terms(array(
+            'taxonomy' => 'beer_medal',
+            'hide_empty' => true,
+        ));
+        
+        ?>
+        <p>
+            <label for="<?php echo $this->get_field_id('title'); ?>"><?php _e('タイトル:', 'regional-beer-awards'); ?></label>
+            <input class="widefat" id="<?php echo $this->get_field_id('title'); ?>" name="<?php echo $this->get_field_name('title'); ?>" type="text" value="<?php echo esc_attr($title); ?>">
+        </p>
+        
+        <p>
+            <label for="<?php echo $this->get_field_id('contest'); ?>"><?php _e('コンテスト:', 'regional-beer-awards'); ?></label>
+            <select class="widefat" id="<?php echo $this->get_field_id('contest'); ?>" name="<?php echo $this->get_field_name('contest'); ?>">
+                <option value=""><?php _e('すべてのコンテスト', 'regional-beer-awards'); ?></option>
+                <?php foreach ($contests as $contest_term) : ?>
+                    <option value="<?php echo $contest_term->slug; ?>" <?php selected($contest, $contest_term->slug); ?>><?php echo $contest_term->name; ?></option>
+                <?php endforeach; ?>
+            </select>
+        </p>
+        
+        <p>
+            <label for="<?php echo $this->get_field_id('year'); ?>"><?php _e('年:', 'regional-beer-awards'); ?></label>
+            <select class="widefat" id="<?php echo $this->get_field_id('year'); ?>" name="<?php echo $this->get_field_name('year'); ?>">
+                <option value=""><?php _e('すべての年', 'regional-beer-awards'); ?></option>
+                <?php foreach ($years as $year_term) : ?>
+                    <option value="<?php echo $year_term->slug; ?>" <?php selected($year, $year_term->slug); ?>><?php echo $year_term->name; ?></option>
+                <?php endforeach; ?>
+            </select>
+        </p>
+        
+        <p>
+            <label for="<?php echo $this->get_field_id('medal'); ?>"><?php _e('メダル:', 'regional-beer-awards'); ?></label>
+            <select class="widefat" id="<?php echo $this->get_field_id('medal'); ?>" name="<?php echo $this->get_field_name('medal'); ?>">
+                <option value=""><?php _e('すべてのメダル', 'regional-beer-awards'); ?></option>
+                <?php foreach ($medals as $medal_term) : ?>
+                    <option value="<?php echo $medal_term->slug; ?>" <?php selected($medal, $medal_term->slug); ?>><?php echo $medal_term->name; ?></option>
+                <?php endforeach; ?>
+            </select>
+        </p>
+        
+        <p>
+            <label for="<?php echo $this->get_field_id('limit'); ?>"><?php _e('表示件数:', 'regional-beer-awards'); ?></label>
+            <input class="tiny-text" id="<?php echo $this->get_field_id('limit'); ?>" name="<?php echo $this->get_field_name('limit'); ?>" type="number" value="<?php echo esc_attr($limit); ?>" min="1" max="50">
+        </p>
+        <?php
+    }
+    
+    // ウィジェット設定の保存
+    public function update($new_instance, $old_instance) {
+        $instance = array();
+        $instance['title'] = (!empty($new_instance['title'])) ? sanitize_text_field($new_instance['title']) : '';
+        $instance['contest'] = (!empty($new_instance['contest'])) ? sanitize_text_field($new_instance['contest']) : '';
+        $instance['year'] = (!empty($new_instance['year'])) ? sanitize_text_field($new_instance['year']) : '';
+        $instance['medal'] = (!empty($new_instance['medal'])) ? sanitize_text_field($new_instance['medal']) : '';
+        $instance['limit'] = (!empty($new_instance['limit'])) ? intval($new_instance['limit']) : 5;
+        
+        return $instance;
+    }
+}
+
+/**
+ * File: regional-beer-awards/includes/class-beer-awards-rest-api.php
+ * Description: Registers REST API endpoints
+ */
+<?php
+/**
+ * REST APIのエンドポイントを管理するクラス
+ */
+class Beer_Awards_REST_API {
+    public function __construct() {
+        // REST APIの初期化
+        add_action('rest_api_init', array($this, 'register_rest_routes'));
+    }
+    
+    // REST APIのルート登録
+    public function register_rest_routes() {
+        register_rest_route('beer-awards/v1', '/contests', array(
+            'methods' => 'GET',
+            'callback' => array($this, 'get_contests'),
+            'permission_callback' => '__return_true'
+        ));
+        
+        register_rest_route('beer-awards/v1', '/awards', array(
+            'methods' => 'GET',
+            'callback' => array($this, 'get_awards'),
+            'permission_callback' => '__return_true'
+        ));
+        
+        register_rest_route('beer-awards/v1', '/brewery/(?P<brewery>[a-zA-Z0-9-]+)', array(
+            'methods' => 'GET',
+            'callback' => array($this, 'get_brewery_awards'),
+            'permission_callback' => '__return_true'
+        ));
+        
+        register_rest_route('beer-awards/v1', '/stats', array(
+            'methods' => 'GET',
+            'callback' => array($this, 'get_stats'),
+            'permission_callback' => '__return_true'
+        ));
+    }
+    
+    // コンテスト一覧を取得するエンドポイント
+    public function get_contests($request) {
+        $contests = get_terms(array(
+            'taxonomy' => 'beer_contest',
+            'hide_empty' => true
+        ));
+        
+        $data = array();
+        foreach ($contests as $contest) {
+            // 年の一覧も取得
+            $years = get_terms(array(
+                'taxonomy' => 'beer_year',
+                'hide_empty' => true,
+                'meta_query' => array(
+                    array(
+                        'relation' => 'EXISTS',
+                        array(
+                            'key' => 'contest_id',
+                            'value' => $contest->term_id,
+                            'compare' => '='
+                        )
+                    )
+                )
+            ));
+            
+            $years_data = array();
+            foreach ($years as $year) {
+                $years_data[] = array(
+                    'id' => $year->term_id,
+                    'name' => $year->name,
+                    'slug' => $year->slug,
+                    'count' => $year->count
+                );
+            }
+            
+            $data[] = array(
+                'id' => $contest->term_id,
+                'name' => $contest->name,
+                'slug' => $contest->slug,
+                'count' => $contest->count,
+                'years' => $years_data
+            );
+        }
+        
+        return new WP_REST_Response($data, 200);
+    }
+    
+    // 受賞データを取得するエンドポイント
+    public function get_awards($request) {
+        $params = $request->get_params();
+        
+        $args = array(
+            'post_type' => 'award_beer',
+            'posts_per_page' => isset($params['per_page']) ? intval($params['per_page']) : 20,
+            'paged' => isset($params['page']) ? intval($params['page']) : 1,
+            'tax_query' => array()
+        );
+        
+        // 絞り込み条件を追加
+        if (!empty($params['contest'])) {
+            $args['tax_query'][] = array(
+                'taxonomy' => 'beer_contest',
+                'field' => 'slug',
+                'terms' => $params['contest']
+            );
+        }
+        
+        if (!empty($params['year'])) {
+            $args['tax_query'][] = array(
+                'taxonomy' => 'beer_year',
+                'field' => 'slug',
+                'terms' => $params['year']
+            );
+        }
+        
+        if (!empty($params['country'])) {
+            $args['tax_query'][] = array(
+                'taxonomy' => 'beer_country',
+                'field' => 'slug',
+                'terms' => $params['country']
+            );
+        }
+        
+        if (!empty($params['state'])) {
+            $args['tax_query'][] = array(
+                'taxonomy' => 'beer_state',
+                'field' => 'slug',
+                'terms' => $params['state']
+            );
+        }
+        
+        if (!empty($params['city'])) {
+            $args['tax_query'][] = array(
+                'taxonomy' => 'beer_city',
+                'field' => 'slug',
+                'terms' => $params['city']
+            );
+        }
+        
+        if (!empty($params['category'])) {
+            $args['tax_query'][] = array(
+                'taxonomy' => 'beer_category',
+                'field' => 'slug',
+                'terms' => $params['category']
+            );
+        }
+        
+        if (!empty($params['medal'])) {
+            $args['tax_query'][] = array(
+                'taxonomy' => 'beer_medal',
+                'field' => 'slug',
+                'terms' => $params['medal']
+            );
+        }
+        
+        // タクソノミークエリの関係設定
+        if (count($args['tax_query']) > 1) {
+            $args['tax_query']['relation'] = 'AND';
+        }
+        
+        $query = new WP_Query($args);
+        $awards = array();
+        
+        if ($query->have_posts()) {
+            while ($query->have_posts()) {
+                $query->the_post();
+                
+                // タクソノミーの取得
+                $contest_terms = get_the_terms(get_the_ID(), 'beer_contest');
+                $year_terms = get_the_terms(get_the_ID(), 'beer_year');
+                $country_terms = get_the_terms(get_the_ID(), 'beer_country');
+                $state_terms = get_the_terms(get_the_ID(), 'beer_state');
+                $city_terms = get_the_terms(get_the_ID(), 'beer_city');
+                $category_terms = get_the_terms(get_the_ID(), 'beer_category');
+                $medal_terms = get_the_terms(get_the_ID(), 'beer_medal');
+                
+                $awards[] = array(
+                    'id' => get_the_ID(),
+                    'title' => get_the_title(),
+                    'brewery' => get_post_meta(get_the_ID(), '_brewery', true),
+                    'place' => get_post_meta(get_the_ID(), '_place', true),
+                    'contest' => $contest_terms ? $contest_terms[0]->name : '',
+                    'year' => $year_terms ? $year_terms[0]->name : '',
+                    'country' => $country_terms ? $country_terms[0]->name : '',
+                    'state' => $state_terms ? $state_terms[0]->name : '',
+                    'city' => $city_terms ? $city_terms[0]->name : '',
+                    'category' => $category_terms ? $category_terms[0]->name : '',
+                    'medal' => $medal_terms ? $medal_terms[0]->name : '',
+                    'link' => get_permalink()
+                );
+            }
+        }
+        
+        wp_reset_postdata();
+        
+        return new WP_REST_Response(array(
+            'total' => $query->found_posts,
+            'pages' => $query->max_num_pages,
+            'awards' => $awards
+        ), 200);
+    }
+    
+    // 醸造所の受賞履歴を取得するエンドポイント
+    public function get_brewery_awards($request) {
+        $brewery = urldecode($request['brewery']);
+        
+        $args = array(
+            'post_type' => 'award_beer',
+            'posts_per_page' => -1,
+            'meta_query' => array(
+                array(
+                    'key' => '_brewery',
+                    'value' => $brewery,
+                    'compare' => 'LIKE'
+                )
+            )
+        );
+        
+        $query = new WP_Query($args);
+        $awards = array();
+        
+        if ($query->have_posts()) {
+            while ($query->have_posts()) {
+                $query->the_post();
+                
+                // タクソノミーの取得
+                $contest_terms = get_the_terms(get_the_ID(), 'beer_contest');
+                $year_terms = get_the_terms(get_the_ID(), 'beer_year');
+                $category_terms = get_the_terms(get_the_ID(), 'beer_category');
+                $medal_terms = get_the_terms(get_the_ID(), 'beer_medal');
+                
+                $awards[] = array(
+                    'id' => get_the_ID(),
+                    'title' => get_the_title(),
+                    'place' => get_post_meta(get_the_ID(), '_place', true),
+                    'contest' => $contest_terms ? $contest_terms[0]->name : '',
+                    'year' => $year_terms ? $year_terms[0]->name : '',
+                    'category' => $category_terms ? $category_terms[0]->name : '',
+                    'medal' => $medal_terms ? $medal_terms[0]->name : '',
+                    'link' => get_permalink()
+                );
+            }
+        }
+        
+        wp_reset_postdata();
+        
+        return new WP_REST_Response(array(
+            'brewery' => $brewery,
+            'total' => count($awards),
+            'awards' => $awards
+        ), 200);
+    }
+    
+    // 統計データを取得するエンドポイント
+    public function get_stats($request) {
+        $params = $request->get_params();
+        
+        $contest = isset($params['contest']) ? $params['contest'] : '';
+        $year = isset($params['year']) ? $params['year'] : '';
+        $stat_type = isset($params['type']) ? $params['type'] : 'country';
+        
+        $args = array(
+            'post_type' => 'award_beer',
+            'posts_per_page' => -1,
+            'tax_query' => array()
+        );
+        
+        // コンテストで絞り込み
+        if (!empty($contest)) {
+            $args['tax_query'][] = array(
+                'taxonomy' => 'beer_contest',
+                'field' => 'slug',
+                'terms' => $contest
+            );
+        }
+        
+        // 年で絞り込み
+        if (!empty($year)) {
+            $args['tax_query'][] = array(
+                'taxonomy' => 'beer_year',
+                'field' => 'slug',
+                'terms' => $year
+            );
+        }
+        
+        $query = new WP_Query($args);
+        
+        $stats = array();
+        
+        if ($query->have_posts()) {
+            while ($query->have_posts()) {
+                $query->the_post();
+                
+                switch ($stat_type) {
+                    case 'country':
+                        $terms = get_the_terms(get_the_ID(), 'beer_country');
+                        if ($terms && !is_wp_error($terms)) {
+                            $country = $terms[0]->name;
+                            if (!isset($stats[$country])) {
+                                $stats[$country] = 0;
+                            }
+                            $stats[$country]++;
+                        }
+                        break;
+                        
+                    case 'category':
+                        $terms = get_the_terms(get_the_ID(), 'beer_category');
+                        if ($terms && !is_wp_error($terms)) {
+                            $category = $terms[0]->name;
+                            if (!isset($stats[$category])) {
+                                $stats[$category] = 0;
+                            }
+                            $stats[$category]++;
+                        }
+                        break;
+                        
+                    case 'medal':
+                        $terms = get_the_terms(get_the_ID(), 'beer_medal');
+                        if ($terms && !is_wp_error($terms)) {
+                            $medal = $terms[0]->name;
+                            if (!isset($stats[$medal])) {
+                                $stats[$medal] = 0;
+                            }
+                            $stats[$medal]++;
+                        }
+                        break;
+                        
+                    case 'brewery':
+                        $brewery = get_post_meta(get_the_ID(), '_brewery', true);
+                        if (!empty($brewery)) {
+                            if (!isset($stats[$brewery])) {
+                                $stats[$brewery] = 0;
+                            }
+                            $stats[$brewery]++;
+                        }
+                        break;
+                }
+            }
+            
+            wp_reset_postdata();
+            
+            // 値の降順でソート
+            arsort($stats);
+        }
+        
+        // 結果を配列形式に変換
+        $result = array();
+        foreach ($stats as $key => $value) {
+            $result[] = array(
+                'name' => $key,
+                'count' => $value
+            );
+        }
+        
+        return new WP_REST_Response(array(
+            'total' => array_sum($stats),
+            'stats' => $result
+        ), 200);
+    }
+}
+
+/**
+ * File: regional-beer-awards/includes/importers/class-csv-importer.php
+ * Description: Handles CSV file imports
+ */
+<?php
+/**
+ * CSV形式のインポートを処理するクラス
+ */
+class Beer_Awards_CSV_Importer {
+    /**
+     * CSVファイルからデータをインポート
+     *
+     * @param array $file $_FILES['csv_file']形式
+     * @param string $contest_name コンテスト名
+     * @param string $contest_year 開催年
+     * @param string $encoding 文字コード
+     * @return array 処理結果
+     */
+    public function import($file, $contest_name, $contest_year, $encoding = 'UTF-8') {
+        if ($file['error'] !== UPLOAD_ERR_OK) {
+            return array(
+                'success' => false,
+                'message' => sprintf(__('ファイルのアップロードに失敗しました。エラーコード: %d', 'regional-beer-awards'), $file['error'])
+            );
+        }
+        
+        // CSVファイルの文字コードをUTF-8に変換
+        $csv_content = file_get_contents($file['tmp_name']);
+        if ($encoding !== 'UTF-8' && mb_detect_encoding($csv_content, 'UTF-8, SJIS, EUC-JP, ASCII') !== 'UTF-8') {
+            $csv_content = mb_convert_encoding($csv_content, 'UTF-8', $encoding);
+            $temp_file = tempnam(sys_get_temp_dir(), 'csv_');
+            file_put_contents($temp_file, $csv_content);
+            $file_path = $temp_file;
+        } else {
+            $file_path = $file['tmp_name'];
+        }
+        
+        $handle = fopen($file_path, 'r');
+        if ($handle === false) {
+            return array(
+                'success' => false,
+                'message' => __('ファイルを開けませんでした', 'regional-beer-awards')
+            );
+        }
+        
+        // ヘッダー行の読み込み
+        $header = fgetcsv($handle, 0, ',');
+        
+        // 必要なヘッダーカラムの確認
+        $required_columns = array('Award', 'Beer Name', 'Brewery', 'Category', 'City', 'State', 'Country', 'Place');
+        $missing_columns = array_diff($required_columns, $header);
+        
+        if (!empty($missing_columns)) {
+            fclose($handle);
+            return array(
+                'success' => false,
+                'message' => sprintf(
+                    __('CSVファイルに必要なカラムが不足しています: %s', 'regional-beer-awards'),
+                    implode(', ', $missing_columns)
+                )
+            );
+        }
+        
+        // ヘッダーのインデックスを取得
+        $header_indices = array_flip($header);
+        
+        // コンテストと年をタクソノミーに登録
+        $contest_term = term_exists($contest_name, 'beer_contest');
+        if (!$contest_term) {
+            $contest_term = wp_insert_term($contest_name, 'beer_contest');
+        }
+        
+        $year_term = term_exists($contest_year, 'beer_year');
+        if (!$year_term) {
+            $year_term = wp_insert_term($contest_year, 'beer_year');
+        }
+        
+        // 処理カウンター
+        $processed = 0;
+        $created = 0;
+        $updated = 0;
+        $skipped = 0;
+        $errors = array();
+        
+        // 各行を処理
+        while (($data = fgetcsv($handle, 0, ',')) !== false) {
+            $processed++;
             
             try {
-                var jsonData = convertMarkdownToJson(markdown, contestName, contestYear);
-                $('#json_output').val(JSON.stringify(jsonData, null, 2));
-                $('#download_json, #copy_json').prop('disabled', false);
-            } catch (e) {
-                alert('変換エラー: ' + e.message);
+                // データの取得
+                $award = isset($data[$header_indices['Award']]) ? $data[$header_indices['Award']] : '';
+                $beer_name = isset($data[$header_indices['Beer Name']]) ? $data[$header_indices['Beer Name']] : '';
+                $brewery = isset($data[$header_indices['Brewery']]) ? $data[$header_indices['Brewery']] : '';
+                $category = isset($data[$header_indices['Category']]) ? $data[$header_indices['Category']] : '';
+                $city = isset($data[$header_indices['City']]) ? $data[$header_indices['City']] : '';
+                $state = isset($data[$header_indices['State']]) ? $data[$header_indices['State']] : '';
+                $country = isset($data[$header_indices['Country']]) ? $data[$header_indices['Country']] : '';
+                $place = isset($data[$header_indices['Place']]) ? $data[$header_indices['Place']] : '';
+                
+                // ビール名と醸造所は必須
+                if (empty($beer_name) || empty($brewery)) {
+                    $skipped++;
+                    continue;
+                }
+                
+                // 既存の投稿を検索
+                $existing_posts = get_posts(array(
+                    'post_type' => 'award_beer',
+                    'post_status' => 'publish',
+                    'title' => $beer_name,
+                    'meta_query' => array(
+                        array(
+                            'key' => '_brewery',
+                            'value' => $brewery,
+                            'compare' => '='
+                        )
+                    ),
+                    'tax_query' => array(
+                        array(
+                            'taxonomy' => 'beer_contest',
+                            'field' => 'name',
+                            'terms' => $contest_name
+                        ),
+                        array(
+                            'taxonomy' => 'beer_year',
+                            'field' => 'name',
+                            'terms' => $contest_year
+                        )
+                    ),
+                    'posts_per_page' => 1
+                ));
+                
+                if (!empty($existing_posts)) {
+                    // 既存の投稿を更新
+                    $post_id = $existing_posts[0]->ID;
+                    $updated++;
+                } else {
+                    // 新規投稿を作成
+                    $post_id = wp_insert_post(array(
+                        'post_title' => $beer_name,
+                        'post_type' => 'award_beer',
+                        'post_status' => 'publish'
+                    ));
+                    
+                    if (is_wp_error($post_id)) {
+                        $errors[] = sprintf(
+                            __('行 %d: %s - %s', 'regional-beer-awards'),
+                            $processed,
+                            $beer_name,
+                            $post_id->get_error_message()
+                        );
+                        $skipped++;
+                        continue;
+                    }
+                    
+                    $created++;
+                }
+                
+                // メタデータを更新
+                update_post_meta($post_id, '_brewery', sanitize_text_field($brewery));
+                update_post_meta($post_id, '_place', intval($place));
+                
+                // タクソノミーを設定
+                wp_set_object_terms($post_id, $contest_name, 'beer_contest');
+                wp_set_object_terms($post_id, $contest_year, 'beer_year');
+                
+                if (!empty($award)) {
+                    wp_set_object_terms($post_id, sanitize_text_field($award), 'beer_medal');
+                }
+                
+                if (!empty($category)) {
+                    wp_set_object_terms($post_id, sanitize_text_field($category), 'beer_category');
+                }
+                
+                if (!empty($country)) {
+                    wp_set_object_terms($post_id, sanitize_text_field($country), 'beer_country');
+                }
+                
+                if (!empty($state)) {
+                    wp_set_object_terms($post_id, sanitize_text_field($state), 'beer_state');
+                }
+                
+                if (!empty($city)) {
+                    wp_set_object_terms($post_id, sanitize_text_field($city), 'beer_city');
+                }
+            } catch (Exception $e) {
+                $errors[] = sprintf(
+                    __('行 %d: %s - %s', 'regional-beer-awards'),
+                    $processed,
+                    isset($beer_name) ? $beer_name : __('不明', 'regional-beer-awards'),
+                    $e->getMessage()
+                );
+                $skipped++;
             }
-        });
+        }
         
-        // JSONをダウンロード
-        $('#download_json').on('click', function() {
-            var jsonStr = $('#json_output').val();
-            if (!jsonStr) return;
-            
-            var contestName = $('#contest_name_md').val();
-            var contestYear = $('#contest_year_md').val();
-            var filename = contestName.replace(/\s+/g, '_') + '_' + contestYear + '.json';
-            
-            var dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(jsonStr);
-            var downloadAnchorNode = document.createElement('a');
-            downloadAnchorNode.setAttribute("href", dataStr);
-            downloadAnchorNode.setAttribute("download", filename);
-            document.body.appendChild(downloadAnchorNode);
-            downloadAnchorNode.click();
-            downloadAnchorNode.remove();
-        });
+        fclose($handle);
         
-        // JSONをコピー
-        $('#copy_json').on('click', function() {
-            var jsonStr = $('#json_output').val();
-            if (!jsonStr) return;
-            
-            $('#json_output').select();
-            document.execCommand('copy');
-            
-            alert('JSONをクリップボードにコピーしました。');
-        });
+        // 一時ファイルの削除
+        if (isset($temp_file) && file_exists($temp_file)) {
+            unlink($temp_file);
+        }
         
-        // マークダウンをJSONに変換する関数
-        function convertMarkdownToJson(markdown, contestName, contestYear) {
+        return array(
+            'success' => true,
+            'message' => __('CSVインポート完了', 'regional-beer-awards'),
+            'processed' => $processed,
+            'created' => $created,
+            'updated' => $updated,
+            'skipped' => $skipped,
+            'errors' => $errors
+        );
+    }
+}
+
+/**
+ * File: regional-beer-awards/includes/importers/class-json-importer.php
+ * Description: Handles JSON file imports
+ */
+<?php
+/**
+ * JSON形式のインポートを処理するクラス
+ */
+class Beer_Awards_JSON_Importer {
+    /**
+     * JSONファイルからデータをインポート
+     *
+     * @param array $file $_FILES['json_file']形式
+     * @return array 処理結果
+     */
+    public function import($file) {
+        if ($file['error'] !== UPLOAD_ERR_OK) {
+            return array(
+                'success' => false,
+                'message' => sprintf(__('ファイルのアップロードに失敗しました。エラーコード: %d', 'regional-beer-awards'), $file['error'])
+            );
+        }
+        
+        // JSONファイルを読み込む
+        $json_content = file_get_contents($file['tmp_name']);
+        $data = json_decode($json_content, true);
+        
+        if (json_last_error() !== JSON_ERROR_NONE) {
+            return array(
+                'success' => false,
+                'message' => sprintf(__('JSONの解析に失敗しました: %s', 'regional-beer-awards'), json_last_error_msg())
+            );
+        }
+        
+        // 必要なデータがあるか確認
+        if (!isset($data['contest']) || !isset($data['year']) || !isset($data['awards']) || !is_array($data['awards'])) {
+            return array(
+                'success' => false,
+                'message' => __('JSONの形式が正しくありません。contest, year, awardsが必要です。', 'regional-beer-awards')
+            );
+        }
+        
+        $contest_name = sanitize_text_field($data['contest']);
+        $contest_year = sanitize_text_field($data['year']);
+        $awards = $data['awards'];
+        
+        // コンテストと年をタクソノミーに登録
+        $contest_term = term_exists($contest_name, 'beer_contest');
+        if (!$contest_term) {
+            $contest_term = wp_insert_term($contest_name, 'beer_contest');
+        }
+        
+        $year_term = term_exists($contest_year, 'beer_year');
+        if (!$year_term) {
+            $year_term = wp_insert_term($contest_year, 'beer_year');
+        }
+        
+        // 処理カウンター
+        $processed = 0;
+        $created = 0;
+        $updated = 0;
+        $skipped = 0;
+        $errors = array();
+        
+        // 各受賞データを処理
+        foreach ($awards as $award) {
+            $processed++;
+            
+            try {
+                // 必須フィールドの確認
+                if (!isset($award['beer_name']) || !isset($award['brewery'])) {
+                    $skipped++;
+                    $errors[] = sprintf(__('項目 %d: ビール名または醸造所がありません。', 'regional-beer-awards'), $processed);
+                    continue;
+                }
+                
+                $beer_name = sanitize_text_field($award['beer_name']);
+                $brewery = sanitize_text_field($award['brewery']);
+                $medal = isset($award['medal']) ? sanitize_text_field($award['medal']) : '';
+                $category = isset($award['category']) ? sanitize_text_field($award['category']) : '';
+                $city = isset($award['city']) ? sanitize_text_field($award['city']) : '';
+                $state = isset($award['state']) ? sanitize_text_field($award['state']) : '';
+                $country = isset($award['country']) ? sanitize_text_field($award['country']) : '';
+                $place = isset($award['place']) ? intval($award['place']) : '';
+                
+                // 既存の投稿を検索
+                $existing_posts = get_posts(array(
+                    'post_type' => 'award_beer',
+                    'post_status' => 'publish',
+                    'title' => $beer_name,
+                    'meta_query' => array(
+                        array(
+                            'key' => '_brewery',
+                            'value' => $brewery,
+                            'compare' => '='
+                        )
+                    ),
+                    'tax_query' => array(
+                        array(
+                            'taxonomy' => 'beer_contest',
+                            'field' => 'name',
+                            'terms' => $contest_name
+                        ),
+                        array(
+                            'taxonomy' => 'beer_year',
+                            'field' => 'name',
+                            'terms' => $contest_year
+                        )
+                    ),
+                    'posts_per_page' => 1
+                ));
+                
+                if (!empty($existing_posts)) {
+                    // 既存の投稿を更新
+                    $post_id = $existing_posts[0]->ID;
+                    $updated++;
+                } else {
+                    // 新規投稿を作成
+                    $post_id = wp_insert_post(array(
+                        'post_title' => $beer_name,
+                        'post_type' => 'award_beer',
+                        'post_status' => 'publish'
+                    ));
+                    
+                    if (is_wp_error($post_id)) {
+                        $errors[] = sprintf(
+                            __('項目 %d: %s - %s', 'regional-beer-awards'),
+                            $processed,
+                            $beer_name,
+                            $post_id->get_error_message()
+                        );
+                        $skipped++;
+                        continue;
+                    }
+                    
+                    $created++;
+                }
+                
+                // メタデータを更新
+                update_post_meta($post_id, '_brewery', $brewery);
+                update_post_meta($post_id, '_place', $place);
+                
+                // タクソノミーを設定
+                wp_set_object_terms($post_id, $contest_name, 'beer_contest');
+                wp_set_object_terms($post_id, $contest_year, 'beer_year');
+                
+                if (!empty($medal)) {
+                    wp_set_object_terms($post_id, $medal, 'beer_medal');
+                }
+                
+                if (!empty($category)) {
+                    wp_set_object_terms($post_id, $category, 'beer_category');
+                }
+                
+                if (!empty($country)) {
+                    wp_set_object_terms($post_id, $country, 'beer_country');
+                }
+                
+                if (!empty($state)) {
+                    wp_set_object_terms($post_id, $state, 'beer_state');
+                }
+                
+                if (!empty($city)) {
+                    wp_set_object_terms($post_id, $city, 'beer_city');
+                }
+            } catch (Exception $e) {
+                $errors[] = sprintf(
+                    __('項目 %d: %s - %s', 'regional-beer-awards'),
+                    $processed,
+                    isset($beer_name) ? $beer_name : __('不明', 'regional-beer-awards'),
+                    $e->getMessage()
+                );
+                $skipped++;
+            }
+        }
+        
+        return array(
+            'success' => true,
+            'message' => __('JSONインポート完了', 'regional-beer-awards'),
+            'processed' => $processed,
+            'created' => $created,
+            'updated' => $updated,
+            'skipped' => $skipped,
+            'errors' => $errors
+        );
+    }
+}
+
+/**
+ * File: regional-beer-awards/includes/importers/class-markdown-converter.php
+ * Description: Converts markdown tables to JSON
+ */
+<?php
+/**
+ * マークダウンテーブルをJSONに変換するクラス
+ */
+class Beer_Awards_Markdown_Converter {
+    /**
+     * マークダウンテーブルをJSONに変換
+     *
+     * @param string $markdown マークダウンテーブル
+     * @param string $contest_name コンテスト名
+     * @param string $contest_year 開催年
+     * @return array 変換結果
+     */
+    public function convert_to_json($markdown, $contest_name, $contest_year) {
+        try {
             // 改行で分割して行ごとに処理
-            var lines = markdown.trim().split('\n');
+            $lines = explode("\n", trim($markdown));
             
-            if (lines.length < 3) {
-                throw new Error('マークダウンテーブルの形式が正しくありません。最低3行（ヘッダー、区切り、データ）が必要です。');
+            if (count($lines) < 3) {
+                return array(
+                    'success' => false,
+                    'message' => __('マークダウンテーブルの形式が正しくありません。最低3行（ヘッダー、区切り、データ）が必要です。', 'regional-beer-awards')
+                );
             }
             
             // ヘッダー行を取得し、カラム名を抽出
-            var headerLine = lines[0].trim();
-            var headers = headerLine.split('|').map(function(item) {
-                return item.trim();
-            }).filter(function(item) {
-                return item !== '';
+            $header_line = trim($lines[0]);
+            $headers = array_map('trim', explode('|', $header_line));
+            $headers = array_filter($headers, function($item) {
+                return $item !== '';
             });
             
             // 区切り行をスキップ
             
             // データ行を処理
-            var awards = [];
-            for (var i = 2; i < lines.length; i++) {
-                var line = lines[i].trim();
+            $awards = array();
+            for ($i = 2; $i < count($lines); $i++) {
+                $line = trim($lines[$i]);
                 
                 // 空行はスキップ
-                if (!line) continue;
+                if (empty($line)) continue;
                 
-                var cells = line.split('|').map(function(item) {
-                    return item.trim();
-                }).filter(function(item, index) {
-                    // 最初と最後の空セルを除外（テーブル両端の|による）
-                    return index > 0 && index <= headers.length;
-                });
+                $cells = array_map('trim', explode('|', $line));
                 
-                if (cells.length !== headers.length) {
-                    console.warn('行 ' + (i + 1) + ': カラム数が一致しません。スキップします。', cells);
-                    continue;
+                // 最初と最後の空セルを除外（テーブル両端の|による）
+                $cells = array_filter($cells, function($item, $index) use ($cells) {
+                    return $index !== 0 || $item !== '' && $index !== count($cells) - 1 || $item !== '';
+                }, ARRAY_FILTER_USE_BOTH);
+                
+                $cells = array_values($cells); // インデックスをリセット
+                
+                if (count($cells) !== count($headers)) {
+                    continue; // カラム数が一致しない行はスキップ
                 }
                 
-                var award = {};
-                for (var j = 0; j < headers.length; j++) {
-                    var key = headers[j].toLowerCase().replace(/\s+/g, '_');
+                $award = array();
+                $headers_array = array_values($headers); // インデックスをリセット
+                
+                for ($j = 0; $j < count($headers_array); $j++) {
+                    $key = strtolower(str_replace(' ', '_', $headers_array[$j]));
                     
                     // キー名を標準化
-                    if (key === 'award') key = 'medal';
+                    if ($key === 'award') $key = 'medal';
                     
-                    award[key] = cells[j];
+                    $award[$key] = $cells[$j];
                     
                     // placeは数値に変換
-                    if (key === 'place') {
-                        award[key] = parseInt(cells[j], 10) || cells[j];
+                    if ($key === 'place') {
+                        $award[$key] = intval($cells[$j]);
                     }
                 }
                 
-                awards.push(award);
+                $awards[] = $award;
             }
             
-            return {
-                contest: contestName,
-                year: contestYear,
-                awards: awards
-            };
+            // JSON構造を作成
+            $json_data = array(
+                'contest' => $contest_name,
+                'year' => $contest_year,
+                'awards' => $awards
+            );
+            
+            return array(
+                'success' => true,
+                'message' => __('変換完了', 'regional-beer-awards'),
+                'json' => $json_data
+            );
+        } catch (Exception $e) {
+            return array(
+                'success' => false,
+                'message' => $e->getMessage()
+            );
         }
-    });
-    </script>
-    <?php
+    }
 }
 
-// JSONファイルからビール受賞データをインポートする関数
-function import_beer_awards_from_json($file_path) {
-    if (!file_exists($file_path)) {
-        return array(
-            'success' => false,
-            'message' => 'ファイルが存在しません: ' . $file_path
-        );
-    }
-    
-    // JSONファイルを読み込む
-    $json_content = file_get_contents($file_path);
-    $data = json_decode($json_content, true);
-    
-    if (json_last_error() !== JSON_ERROR_NONE) {
-        return array(
-            'success' => false,
-            'message' => 'JSONの解析に失敗しました: ' . json_last_error_msg()
-        );
-    }
-    
-    // 必要なデータがあるか確認
-    if (!isset($data['contest']) || !isset($data['year']) || !isset($data['awards']) || !is_array($data['awards'])) {
-        return array(
-            'success' => false,
-            'message' => 'JSONの形式が正しくありません。contest, year, awardsが必要です。'
-        );
-    }
-    
-    $contest_name = sanitize_text_field($data['contest']);
-    $contest_year = sanitize_text_field($data['year']);
-    $awards = $data['awards'];
-    
-    // コンテストと年をタクソノミーに登録
-    $contest_term = term_exists($contest_name, 'beer_contest');
-    if (!$contest_term) {
-        $contest_term = wp_insert_term($contest_name, 'beer_contest');
-    }
-    
-    $year_term = term_exists($contest_year, 'beer_year');
-    if (!$year_term) {
-        $year_term = wp_insert_term($contest_year, 'beer_year');
-    }
-    
-    // 処理カウンター
-    $processed = 0;
-    $created = 0;
-    $updated = 0;
-    $skipped = 0;
-    $errors = array();
-    
-    // 各受賞データを処理
-    foreach ($awards as $award) {
-        $processed++;
-        
-        try {
-            // 必須フィールドの確認
-            if (!isset($award['beer_name']) || !isset($award['brewery'])) {
-                $skipped++;
-                $errors[] = '行 ' . $processed . ': ビール名または醸造所がありません。';
-                continue;
-            }
-            
-            $beer_name = sanitize_text_field($award['beer_name']);
-            $brewery = sanitize_text_field($award['brewery']);
-            $medal = isset($award['medal']) ? sanitize_text_field($award['medal']) : '';
-            $category = isset($award['category']) ? sanitize_text_field($award['category']) : '';
-            $city = isset($award['city']) ? sanitize_text_field($award['city']) : '';
-            $state = isset($award['state']) ? sanitize_text_field($award['state']) : '';
-            $country = isset($award['country']) ? sanitize_text_field($award['country']) : '';
-            $place = isset($award['place']) ? intval($award['place']) : '';
-            
-            // 既存の投稿を検索
-            $existing_posts = get_posts(array(
-                'post_type' => 'award_beer',
-                'post_status' => 'publish',
-                'title' => $beer_name,
-                'meta_query' => array(
-                    array(
-                        'key' => '_brewery',
-                        'value' => $brewery,
-                        'compare' => '='
-                    )
-                ),
-                'tax_query' => array(
-                    array(
-                        'taxonomy' => 'beer_contest',
-                        'field' => 'name',
-                        'terms' => $contest_name
-                    ),
-                    array(
-                        'taxonomy' => 'beer_year',
-                        'field' => 'name',
-                        'terms' => $contest_year
-                    )
-                ),
-                'posts_per_page' => 1
-            ));
-            
-            if (!empty($existing_posts)) {
-                // 既存の投稿を更新
-                $post_id = $existing_posts[0]->ID;
-                $updated++;
-            } else {
-                // 新規投稿を作成
-                $post_id = wp_insert_post(array(
-                    'post_title' => $beer_name,
-                    'post_type' => 'award_beer',
-                    'post_status' => 'publish'
-                ));
-                
-                if (is_wp_error($post_id)) {
-                    $errors[] = '行 ' . $processed . ': ' . $beer_name . ' - ' . $post_id->get_error_message();
-                    $skipped++;
-                    continue;
-                }
-                
-                $created++;
-            }
-            
-            // メタデータを更新
-            update_post_meta($post_id, '_brewery', $brewery);
-            update_post_meta($post_id, '_place', $place);
-            
-            // タクソノミーを設定
-            wp_set_object_terms($post_id, $contest_name, 'beer_contest');
-            wp_set_object_terms($post_id, $contest_year, 'beer_year');
-            
-            if (!empty($medal)) {
-                wp_set_object_terms($post_id, $medal, 'beer_medal');
-            }
-            
-            if (!empty($category)) {
-                wp_set_object_terms($post_id, $category, 'beer_category');
-            }
-            
-            if (!empty($country)) {
-                wp_set_object_terms($post_id, $country, 'beer_country');
-            }
-            
-            if (!empty($state)) {
-                wp_set_object_terms($post_id, $state, 'beer_state');
-            }
-            
-            if (!empty($city)) {
-                wp_set_object_terms($post_id, $city, 'beer_city');
-            }
-        } catch (Exception $e) {
-            $errors[] = '行 ' . $processed . ': ' . (isset($beer_name) ? $beer_name : '不明') . ' - ' . $e->getMessage();
-            $skipped++;
+/**
+ * File: regional-beer-awards/includes/exporters/class-csv-exporter.php
+ * Description: Exports data to CSV format
+ */
+<?php
+/**
+ * CSV形式でデータをエクスポートするクラス
+ */
+class Beer_Awards_CSV_Exporter {
+    /**
+     * 受賞データをCSV形式でエクスポート
+     */
+    public function export() {
+        // 権限チェック
+        if (!current_user_can('manage_options')) {
+            wp_die(__('この機能を使用する権限がありません。', 'regional-beer-awards'));
         }
-    }
-    
-    return array(
-        'success' => true,
-        'message' => 'JSONインポート完了',
-        'processed' => $processed,
-        'created' => $created,
-        'updated' => $updated,
-        'skipped' => $skipped,
-        'errors' => $errors
-    );
-}
-
-// CSVファイルからビール受賞データをインポートする関数
-function import_beer_awards_from_csv($file_path, $contest_name, $contest_year, $encoding = 'UTF-8') {
-    if (!file_exists($file_path)) {
-        return array(
-            'success' => false,
-            'message' => 'ファイルが存在しません: ' . $file_path
-        );
-    }
-    
-    // CSVファイルの文字コードをUTF-8に変換
-    $csv_content = file_get_contents($file_path);
-    if ($encoding !== 'UTF-8' && mb_detect_encoding($csv_content, 'UTF-8, SJIS, EUC-JP, ASCII') !== 'UTF-8') {
-        $csv_content = mb_convert_encoding($csv_content, 'UTF-8', $encoding);
-        $temp_file = tempnam(sys_get_temp_dir(), 'csv_');
-        file_put_contents($temp_file, $csv_content);
-        $file_path = $temp_file;
-    }
-    
-    $handle = fopen($file_path, 'r');
-    if ($handle === false) {
-        return array(
-            'success' => false,
-            'message' => 'ファイルを開けませんでした: ' . $file_path
-        );
-    }
-    
-    // ヘッダー行の読み込み
-    $header = fgetcsv($handle, 0, ',');
-    
-    // 必要なヘッダーカラムの確認
-    $required_columns = array('Award', 'Beer Name', 'Brewery', 'Category', 'City', 'State', 'Country', 'Place');
-    $missing_columns = array_diff($required_columns, $header);
-    
-    if (!empty($missing_columns)) {
-        fclose($handle);
-        return array(
-            'success' => false,
-            'message' => 'CSVファイルに必要なカラムが不足しています: ' . implode(', ', $missing_columns)
-        );
-    }
-    
-    // ヘッダーのインデックスを取得
-    $header_indices = array_flip($header);
-    
-    // コンテストと年をタクソノミーに登録
-    $contest_term = term_exists($contest_name, 'beer_contest');
-    if (!$contest_term) {
-        $contest_term = wp_insert_term($contest_name, 'beer_contest');
-    }
-    
-    $year_term = term_exists($contest_year, 'beer_year');
-    if (!$year_term) {
-        $year_term = wp_insert_term($contest_year, 'beer_year');
-    }
-    
-    // 処理カウンター
-    $processed = 0;
-    $created = 0;
-    $updated = 0;
-    $skipped = 0;
-    $errors = array();
-    
-    // 各行を処理
-    while (($data = fgetcsv($handle, 0, ',')) !== false) {
-        $processed++;
         
-        try {
-            // データの取得
-            $award = isset($data[$header_indices['Award']]) ? $data[$header_indices['Award']] : '';
-            $beer_name = isset($data[$header_indices['Beer Name']]) ? $data[$header_indices['Beer Name']] : '';
-            $brewery = isset($data[$header_indices['Brewery']]) ? $data[$header_indices['Brewery']] : '';
-            $category = isset($data[$header_indices['Category']]) ? $data[$header_indices['Category']] : '';
-            $city = isset($data[$header_indices['City']]) ? $data[$header_indices['City']] : '';
-            $state = isset($data[$header_indices['State']]) ? $data[$header_indices['State']] : '';
-            $country = isset($data[$header_indices['Country']]) ? $data[$header_indices['Country']] : '';
-            $place = isset($data[$header_indices['Place']]) ? $data[$header_indices['Place']] : '';
-            
-            // ビール名と醸造所は必須
-            if (empty($beer_name) || empty($brewery)) {
-                $skipped++;
-                continue;
-            }
-            
-            // 既存の投稿を検索
-            $existing_posts = get_posts(array(
-                'post_type' => 'award_beer',
-                'post_status' => 'publish',
-                'title' => $beer_name,
-                'meta_query' => array(
-                    array(
-                        'key' => '_brewery',
-                        'value' => $brewery,
-                        'compare' => '='
-                    )
-                ),
-                'tax_query' => array(
-                    array(
-                        'taxonomy' => 'beer_contest',
-                        'field' => 'name',
-                        'terms' => $contest_name
-                    ),
-                    array(
-                        'taxonomy' => 'beer_year',
-                        'field' => 'name',
-                        'terms' => $contest_year
-                    )
-                ),
-                'posts_per_page' => 1
-            ));
-            
-            if (!empty($existing_posts)) {
-                // 既存の投稿を更新
-                $post_id = $existing_posts[0]->ID;
-                $updated++;
-            } else {
-                // 新規投稿を作成
-                $post_id = wp_insert_post(array(
-                    'post_title' => $beer_name,
-                    'post_type' => 'award_beer',
-                    'post_status' => 'publish'
-                ));
-                
-                if (is_wp_error($post_id)) {
-                    $errors[] = '行 ' . $processed . ': ' . $beer_name . ' - ' . $post_id->get_error_message();
-                    $skipped++;
-                    continue;
-                }
-                
-                $created++;
-            }
-            
-            // メタデータを更新
-            update_post_meta($post_id, '_brewery', sanitize_text_field($brewery));
-            update_post_meta($post_id, '_place', intval($place));
-            
-            // タクソノミーを設定
-            wp_set_object_terms($post_id, $contest_name, 'beer_contest');
-            wp_set_object_terms($post_id, $contest_year, 'beer_year');
-            
-            if (!empty($award)) {
-                wp_set_object_terms($post_id, sanitize_text_field($award), 'beer_medal');
-            }
-            
-            if (!empty($category)) {
-                wp_set_object_terms($post_id, sanitize_text_field($category), 'beer_category');
-            }
-            
-            if (!empty($country)) {
-                wp_set_object_terms($post_id, sanitize_text_field($country), 'beer_country');
-            }
-            
-            if (!empty($state)) {
-                wp_set_object_terms($post_id, sanitize_text_field($state), 'beer_state');
-            }
-            
-            if (!empty($city)) {
-                wp_set_object_terms($post_id, sanitize_text_field($city), 'beer_city');
-            }
-        } catch (Exception $e) {
-            $errors[] = '行 ' . $processed . ': ' . (isset($beer_name) ? $beer_name : '不明') . ' - ' . $e->getMessage();
-            $skipped++;
+        // クエリパラメータを取得
+        $contest = isset($_GET['contest']) ? sanitize_text_field($_GET['contest']) : '';
+        $year = isset($_GET['year']) ? sanitize_text_field($_GET['year']) : '';
+        
+        // カスタム投稿タイプからデータを取得
+        $args = array(
+            'post_type' => 'award_beer',
+            'posts_per_page' => -1,
+            'tax_query' => array(),
+        );
+        
+        // コンテストで絞り込み
+        if (!empty($contest)) {
+            $args['tax_query'][] = array(
+                'taxonomy' => 'beer_contest',
+                'field' => 'slug',
+                'terms' => $contest,
+            );
         }
-    }
-    
-    fclose($handle);
-    
-    // 一時ファイルの削除
-    if (isset($temp_file) && file_exists($temp_file)) {
-        unlink($temp_file);
-    }
-    
-    return array(
-        'success' => true,
-        'message' => 'CSVインポート完了',
-        'processed' => $processed,
-        'created' => $created,
-        'updated' => $updated,
-        'skipped' => $skipped,
-        'errors' => $errors
-    );
-}
+        
+        // 年で絞り込み
+        if (!empty($year)) {
+            $args['tax_query'][] = array(
+                'taxonomy' => 'beer_year',
+                'field' => 'slug',
+                'terms' => $year,
+            );
+        }
+        
+        $query = new WP_Query($args);
+        
+        if (!$query->have_posts()) {
+            wp_die(__('エクスポートするデータがありません', 'regional-beer-awards'));
+        }
+        
+        // CSVのヘッダー行
+        $csv_data = array(
+            array('Award', 'Beer Name', 'Brewery', 'Category', 'City', 'State', 'Country', 'Place', 'Contest', 'Year')
+        );
+        
+        // 各投稿を処理
+        while ($query->have_posts()) {
+            $query->the_post();
+            
+            $brewery = get_post_meta(get_the_ID(), '_brewery', true);
+            $place = get_post_meta(get_the_ID(), '_place', true);
+            
+            $medals = get_the_terms(get_the_ID(), 'beer_medal');
+            $medal = !empty($medals) ? $medals[0]->name : '';
+            
+            $categories = get_the_terms(get_the_ID(), 'beer_category');
+            $category = !empty($categories) ? $categories[0]->name : '';
+            
+            $cities = get_the_terms(get_the_ID(), 'beer_city');
+            $city = !empty($cities) ? $cities[0]->name : '';
+            
+            $states = get_the_terms(get_the_ID(), 'beer_state');
+            $state = !empty($states) ? $states[0]->name : '';
+            
+            $countries = get_the_terms(get_the_ID(), 'beer_country');
+            $country = !empty($countries) ? $countries[0]->name : '';
+            
+            $contests = get_the_terms(get_the_ID(), 'beer
